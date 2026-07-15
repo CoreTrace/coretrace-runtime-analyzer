@@ -39,3 +39,9 @@
 
 # debug information files
 *.dwo
+
+# Runtime analyzer artifacts
+runtime-analyzer-artifacts/
+
+# Python cache
+__pycache__/
