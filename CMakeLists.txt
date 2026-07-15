@@ -2,20 +2,18 @@
 cmake_minimum_required(VERSION 3.16)
 
 # ============================================================================
-#  CoreTrace Tool Template — Generic CMakeLists
-#
-#  Goal: a consumer should only edit the section "USER CONFIG" below.
+#  CoreTrace Runtime Analyzer
 # ============================================================================
 
 # ------------------------------
-# USER CONFIG (edit this block)
+# PROJECT CONFIG
 # ------------------------------
-set(TOOL_NAME "your_tool_name" CACHE STRING "Tool/project name")
+set(TOOL_NAME "runtime-analyzer" CACHE STRING "Tool/project name" FORCE)
 set(TOOL_NAMESPACE "coretrace" CACHE STRING "CMake namespace for ALIAS targets")
 
 # Library sources (add/remove files here)
 set(TOOL_SOURCES
-    src/your_tool_name.cpp
+    src/runtime_analyzer.cpp
 )
 
 # CLI
@@ -43,10 +41,10 @@ set(CORETRACE_COMPILER_GIT_REPOSITORY "https://github.com/CoreTrace/coretrace-co
 set(CORETRACE_COMPILER_GIT_TAG "main" CACHE STRING "coretrace-compiler git tag")
 
 # ------------------------------
-# END USER CONFIG
+# END PROJECT CONFIG
 # ------------------------------
 
-project(${TOOL_NAME} LANGUAGES CXX)
+project(${TOOL_NAME} LANGUAGES C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(CheckLLVMVersion OPTIONAL)

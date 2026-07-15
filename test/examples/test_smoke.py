@@ -1,0 +1,571 @@
+# SPDX-License-Identifier: Apache-2.0
+import os
+from pathlib import Path
+import shutil
+
+from ctestfw.runner import CompilerRunner, RunnerConfig
+from ctestfw.plan import CompilePlan
+from ctestfw.framework.testcase import TestCase
+from ctestfw.framework.suite import TestSuite
+from ctestfw.framework.reporter import ConsoleReporter
+from ctestfw.assertions.core import Assertion, require
+from ctestfw.assertions.compiler import (
+    assert_exit_code,
+    assert_argv_contains,
+    assert_output_exists,
+    assert_output_name,
+    assert_output_kind,
+    assert_native_binary_kind,
+    assert_output_exists_at,
+    assert_native_binary_kind_at,
+    assert_output_kind_at,
+    assert_output_nonempty_at,
+    assert_stdout_contains
+)
+from ctestfw.inspect.filetype import ArtifactKind
+from ctestfw.platform import detect_platform, OS
+
+ROOT = Path(__file__).resolve().parents[2]
+FIXTURES = ROOT / "test" / "examples" / "fixtures"
+WORK = ROOT / "test" / "examples" / ".work"
+
+def copy_fixtures(ws: Path, files: list[Path]) -> None:
+    for f in files:
+        src = f
+        dst = ws / f.name
+        shutil.copy2(src, dst)
+
+def assert_file_contains(path: str, text: str) -> Assertion:
+    def _check(res) -> None:
+        p = Path(path)
+        if not p.is_absolute():
+            p = res.run.cwd / p
+        require(p.exists(), f"output does not exist: {p}")
+        data = p.read_text(encoding="utf-8", errors="ignore")
+        require(text in data, f"file does not contain '{text}': {p}")
+    return Assertion(name=f"file_contains_{Path(path).name}", check=_check)
+
+def assert_stderr_contains(text: str) -> Assertion:
+    def _check(res) -> None:
+        require(text in (res.run.stderr or ""),
+                f"stderr does not contain '{text}'\nstderr:\n{res.run.stderr}")
+    return Assertion(name=f"stderr_contains_{text}", check=_check)
+
+def _read_artifact_bytes(res, path: str) -> bytes:
+    artifact = Path(path)
+    if not artifact.is_absolute():
+        artifact = res.run.cwd / artifact
+    require(artifact.exists(), f"output does not exist: {artifact}")
+    return artifact.read_bytes()
+
+def _is_windows_native_artifact(data: bytes) -> bool:
+    if data.startswith(b"MZ"):
+        return True
+    if len(data) < 2:
+        return False
+    return data[:2] in {b"\x64\x86", b"\x4c\x01", b"\x64\xaa"}
+
+def assert_windows_native_artifact_at(path: str) -> Assertion:
+    def _check(res) -> None:
+        data = _read_artifact_bytes(res, path)
+        require(
+            _is_windows_native_artifact(data),
+            f"expected PE/COFF artifact at {path}, got unrecognized header",
+        )
+    return Assertion(name=f"windows_native_artifact_{Path(path).name}", check=_check)
+
+def native_artifact_assert_at(path: str, platform_os: OS) -> Assertion:
+    if platform_os == OS.WINDOWS:
+        return assert_windows_native_artifact_at(path)
+    return assert_native_binary_kind_at(path)
+
+def resolve_compiler_binary() -> Path | None:
+    candidates: list[Path] = []
+
+    env_override = os.environ.get("CORETRACE_COMPILER_TEST_CC")
+    if env_override:
+        candidates.append(Path(env_override))
+
+    candidates.extend([
+        ROOT / "dist" / "windows" / "bin" / "cc.exe",
+        ROOT / "build" / "cc",
+        ROOT / "build" / "Release" / "cc.exe",
+        ROOT / "build-win" / "cc.exe",
+        ROOT / "build-win" / "Release" / "cc.exe",
+    ])
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+
+    return None
+
+def main() -> int:
+    platform = detect_platform()
+    cc_bin = resolve_compiler_binary()
+    if cc_bin is None:
+        print("cc binary not found. Tried:")
+        for candidate in [
+            os.environ.get("CORETRACE_COMPILER_TEST_CC", ""),
+            str(ROOT / "dist" / "windows" / "bin" / "cc.exe"),
+            str(ROOT / "build" / "cc"),
+            str(ROOT / "build" / "Release" / "cc.exe"),
+            str(ROOT / "build-win" / "cc.exe"),
+            str(ROOT / "build-win" / "Release" / "cc.exe"),
+        ]:
+            if candidate:
+                print(f"  - {candidate}")
+        return 1
+
+    runner = CompilerRunner(RunnerConfig(executable=cc_bin))
+
+    # Fixtures (ex: hello.c)
+    src = FIXTURES / "hello.c"
+    debug_src = FIXTURES / "debug.c"
+    cpp_src = FIXTURES / "hello.cpp"
+    cpp_as_c_src = FIXTURES / "cpp_as_c.c"
+    vtable_src = FIXTURES / "vtable.cpp"
+
+    def base_out_assertions(out_name: str):
+        assertions = [
+            assert_exit_code(0),
+            assert_argv_contains(["-o"]),          # check args passed
+            assert_output_name(out_name),          # check binary name respected
+            assert_output_exists(),
+        ]
+        if platform.os == OS.WINDOWS:
+            assertions.append(assert_windows_native_artifact_at(out_name))
+        return assertions
+
+    tc_macho = TestCase(
+        name="compile_macho_hello",
+        plan=CompilePlan(
+            name="compile_macho_hello",
+            sources=[Path("hello.c")],   # sera copié dans workspace
+            out=Path("hello.out"),
+            extra_args=[],
+        ),
+        assertions=base_out_assertions("hello.out") + [
+            assert_output_kind(ArtifactKind.MACHO),
+        ],
+    )
+
+    tc_elf = TestCase(
+        name="compile_elf_hello",
+        plan=CompilePlan(
+            name="compile_elf_hello",
+            sources=[Path("hello.c")],
+            out=Path("hello.out"),
+            extra_args=[],
+        ),
+        assertions=base_out_assertions("hello.out") + [
+            assert_output_kind(ArtifactKind.ELF),
+        ],
+    )
+
+    tc_native = TestCase(
+        name="compile_native_hello",
+        plan=CompilePlan(
+            name="compile_native_hello",
+            sources=[Path("hello.c")],
+            out=Path("hello.out"),
+            extra_args=[],
+        ),
+        assertions=base_out_assertions("hello.out") + [
+            assert_windows_native_artifact_at("hello.out") if platform.os == OS.WINDOWS else assert_native_binary_kind(),
+        ],
+    )
+
+    tc_cpp = TestCase(
+        name="compile_cpp_hello",
+        plan=CompilePlan(
+            name="compile_cpp_hello",
+            sources=[Path("hello.cpp")],
+            out=Path("hello_cpp.out"),
+            extra_args=[],
+        ),
+        assertions=base_out_assertions("hello_cpp.out") + [
+            assert_windows_native_artifact_at("hello_cpp.out") if platform.os == OS.WINDOWS else assert_native_binary_kind(),
+        ],
+    )
+
+    tc_o_eq = TestCase(
+        name="compile_o_equals",
+        plan=CompilePlan(
+            name="compile_o_equals",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["-o=main"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["-o=main"]),
+            assert_output_exists_at("main"),
+            native_artifact_assert_at("main", platform.os),
+        ],
+    )
+
+    tc_d_space = TestCase(
+        name="compile_define_space",
+        plan=CompilePlan(
+            name="compile_define_space",
+            sources=[Path("debug.c")],
+            out=None,
+            extra_args=["-D", "DEBUG", "-o=debug_space"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["-D", "DEBUG"]),
+            assert_output_exists_at("debug_space"),
+            native_artifact_assert_at("debug_space", platform.os),
+        ],
+    )
+
+    tc_d_compact = TestCase(
+        name="compile_define_compact",
+        plan=CompilePlan(
+            name="compile_define_compact",
+            sources=[Path("debug.c")],
+            out=None,
+            extra_args=["-DDEBUG", "-o=debug_compact"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["-DDEBUG"]),
+            assert_output_exists_at("debug_compact"),
+            native_artifact_assert_at("debug_compact", platform.os),
+        ],
+    )
+
+    tc_x_cxx = TestCase(
+        name="compile_x_cxx",
+        plan=CompilePlan(
+            name="compile_x_cxx",
+            sources=[],
+            out=None,
+            extra_args=["-x=c++", "cpp_as_c.c", "-o=hello_xcxx.out"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["-x=c++"]),
+            assert_output_exists_at("hello_xcxx.out"),
+            native_artifact_assert_at("hello_xcxx.out", platform.os),
+        ],
+    )
+
+    tc_instrument_c = TestCase(
+        name="compile_instrument_c",
+        plan=CompilePlan(
+            name="compile_instrument_c",
+            sources=[Path("hello.c")],
+            out=Path("hello_instr_c.out"),
+            extra_args=["--instrument"],
+        ),
+        assertions=base_out_assertions("hello_instr_c.out") + [
+            assert_argv_contains(["--instrument"]),
+            assert_windows_native_artifact_at("hello_instr_c.out") if platform.os == OS.WINDOWS else assert_native_binary_kind(),
+        ],
+    )
+
+    tc_instrument_cpp = TestCase(
+        name="compile_instrument_cpp",
+        plan=CompilePlan(
+            name="compile_instrument_cpp",
+            sources=[Path("hello.cpp")],
+            out=Path("hello_instr_cpp.out"),
+            extra_args=["--instrument"],
+        ),
+        assertions=base_out_assertions("hello_instr_cpp.out") + [
+            assert_argv_contains(["--instrument"]),
+            assert_windows_native_artifact_at("hello_instr_cpp.out") if platform.os == OS.WINDOWS else assert_native_binary_kind(),
+        ],
+    )
+
+    tc_instrument_x_cxx = TestCase(
+        name="compile_instrument_x_cxx",
+        plan=CompilePlan(
+            name="compile_instrument_x_cxx",
+            sources=[],
+            out=None,
+            extra_args=["--instrument", "-x=c++", "cpp_as_c.c", "-o=hello_instr_xcxx.out"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--instrument", "-x=c++"]),
+            assert_output_exists_at("hello_instr_xcxx.out"),
+            native_artifact_assert_at("hello_instr_xcxx.out", platform.os),
+        ],
+    )
+
+    tc_instrument_emit_llvm = TestCase(
+        name="compile_instrument_emit_llvm",
+        plan=CompilePlan(
+            name="compile_instrument_emit_llvm",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["--instrument", "-S", "-emit-llvm", "-o=hello_instr.ll"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--instrument", "-S", "-emit-llvm"]),
+            assert_output_exists_at("hello_instr.ll"),
+            assert_output_kind_at("hello_instr.ll", ArtifactKind.LLVM_IR_TEXT),
+            assert_output_nonempty_at("hello_instr.ll"),
+        ],
+    )
+
+    tc_instrument_emit_bc = TestCase(
+        name="compile_instrument_emit_bc",
+        plan=CompilePlan(
+            name="compile_instrument_emit_bc",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["--instrument", "-c", "-emit-llvm", "-o=hello_instr.bc"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--instrument", "-c", "-emit-llvm"]),
+            assert_output_exists_at("hello_instr.bc"),
+            assert_output_nonempty_at("hello_instr.bc"),
+        ],
+    )
+
+    tc_readme_emit_llvm = TestCase(
+        name="readme_emit_llvm",
+        plan=CompilePlan(
+            name="readme_emit_llvm",
+            sources=[Path("hello.cpp")],
+            out=None,
+            extra_args=["-S", "-emit-llvm"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["-S", "-emit-llvm"]),
+            assert_output_kind_at("hello.ll", ArtifactKind.LLVM_IR_TEXT),
+        ],
+    )
+
+    tc_readme_asm = TestCase(
+        name="readme_asm",
+        plan=CompilePlan(
+            name="readme_asm",
+            sources=[Path("hello.cpp")],
+            out=None,
+            extra_args=["-S"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["-S"]),
+            assert_output_nonempty_at("hello.s"),
+        ],
+    )
+
+    tc_readme_c_obj = TestCase(
+        name="readme_c_obj",
+        plan=CompilePlan(
+            name="readme_c_obj",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["-c"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["-c"]),
+            native_artifact_assert_at("hello.o", platform.os),
+        ],
+    )
+
+    tc_readme_c_obj_o2 = TestCase(
+        name="readme_c_obj_o2",
+        plan=CompilePlan(
+            name="readme_c_obj_o2",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["-c", "-O2"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["-c", "-O2"]),
+            native_artifact_assert_at("hello.o", platform.os),
+        ],
+    )
+
+    tc_readme_instrument = TestCase(
+        name="readme_instrument",
+        plan=CompilePlan(
+            name="readme_instrument",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["--instrument", "-o", "app"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--instrument", "-o", "app"]),
+            assert_output_exists_at("app"),
+            native_artifact_assert_at("app", platform.os),
+        ],
+    )
+
+    tc_readme_shadow = TestCase(
+        name="readme_shadow",
+        plan=CompilePlan(
+            name="readme_shadow",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["--instrument", "--ct-shadow", "-o", "app_shadow"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--instrument", "--ct-shadow"]),
+            assert_output_exists_at("app_shadow"),
+            native_artifact_assert_at("app_shadow", platform.os),
+        ],
+    )
+
+    tc_readme_shadow_aggr = TestCase(
+        name="readme_shadow_aggr",
+        plan=CompilePlan(
+            name="readme_shadow_aggr",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["--instrument", "--ct-shadow-aggressive", "--ct-bounds-no-abort", "-o", "app_shadow_aggr"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--instrument", "--ct-shadow-aggressive", "--ct-bounds-no-abort"]),
+            assert_output_exists_at("app_shadow_aggr"),
+            native_artifact_assert_at("app_shadow_aggr", platform.os),
+        ],
+    )
+
+    tc_readme_vtable = TestCase(
+        name="readme_vtable",
+        plan=CompilePlan(
+            name="readme_vtable",
+            sources=[Path("vtable.cpp")],
+            out=None,
+            extra_args=["--instrument", "--ct-modules=vtable", "--ct-vcall-trace", "-o", "app_vtable"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--instrument", "--ct-modules=vtable", "--ct-vcall-trace"]),
+            assert_output_exists_at("app_vtable"),
+            native_artifact_assert_at("app_vtable", platform.os),
+        ],
+    )
+
+    tc_readme_inmem = TestCase(
+        name="readme_inmem",
+        plan=CompilePlan(
+            name="readme_inmem",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["--in-mem", "-S", "-emit-llvm"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--in-mem", "-S", "-emit-llvm"]),
+            assert_stdout_contains("target triple"),
+        ],
+    )
+
+    tc_optnone_emit_llvm = TestCase(
+        name="compile_optnone_emit_llvm",
+        plan=CompilePlan(
+            name="compile_optnone_emit_llvm",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=["--ct-optnone", "-O1", "-S", "-emit-llvm", "-o=hello_optnone.ll"],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--ct-optnone", "-O1", "-S", "-emit-llvm"]),
+            assert_output_exists_at("hello_optnone.ll"),
+            assert_output_kind_at("hello_optnone.ll", ArtifactKind.LLVM_IR_TEXT),
+            assert_output_nonempty_at("hello_optnone.ll"),
+            assert_file_contains("hello_optnone.ll", "optnone"),
+        ],
+    )
+
+    tc_optnone_disable_o0 = TestCase(
+        name="compile_optnone_disable_o0",
+        plan=CompilePlan(
+            name="compile_optnone_disable_o0",
+            sources=[Path("hello.c")],
+            out=None,
+            extra_args=[
+                "--ct-optnone",
+                "-O0",
+                "-Xclang",
+                "-disable-O0-optnone",
+                "-S",
+                "-emit-llvm",
+                "-o",
+                "-",
+            ],
+        ),
+        assertions=[
+            assert_exit_code(0),
+            assert_argv_contains(["--ct-optnone", "-O0", "-Xclang", "-disable-O0-optnone"]),
+            assert_stdout_contains("optnone"),
+            assert_stderr_contains(
+                "warning: ct: -disable-O0-optnone ignored because --ct-optnone is enabled"
+            ),
+        ],
+    )
+
+    common_cases = [tc_o_eq, tc_d_space, tc_d_compact, tc_cpp, tc_x_cxx]
+    instrument_cases = [
+        tc_instrument_c,
+        tc_instrument_cpp,
+        tc_instrument_x_cxx,
+        tc_instrument_emit_llvm,
+        tc_instrument_emit_bc,
+    ]
+    readme_cases = [
+        tc_readme_emit_llvm,
+        tc_readme_asm,
+        tc_readme_c_obj,
+        tc_readme_c_obj_o2,
+        tc_readme_instrument,
+        tc_readme_shadow,
+        tc_readme_shadow_aggr,
+        tc_readme_vtable,
+        tc_readme_inmem,
+        tc_optnone_emit_llvm,
+        tc_optnone_disable_o0,
+    ]
+    if platform.os == OS.MACOS:
+        cases = [tc_macho, *common_cases, *instrument_cases, *readme_cases]
+    elif platform.os == OS.LINUX:
+        cases = [tc_elf, *common_cases, *instrument_cases, *readme_cases]
+    else:
+        windows_readme_cases = [
+            tc_readme_emit_llvm,
+            tc_readme_c_obj,
+            tc_readme_c_obj_o2,
+            tc_readme_instrument,
+            tc_readme_shadow,
+            tc_readme_shadow_aggr,
+            tc_readme_inmem,
+            tc_optnone_emit_llvm,
+            tc_optnone_disable_o0,
+        ]
+        cases = [tc_native, *common_cases, *instrument_cases, *windows_readme_cases]
+
+    suite = TestSuite(name="compiler_smoke", cases=cases)
+
+    reports = []
+    WORK.mkdir(parents=True, exist_ok=True)
+    for case in suite.cases:
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix=f"{case.name}_", dir=str(WORK)) as d:
+            ws = Path(d)
+            copy_fixtures(ws, [src, debug_src, cpp_src, cpp_as_c_src, vtable_src])
+            reports.append(case.run(runner, ws))
+
+    rep = type("Tmp", (), {"name": suite.name, "reports": reports})()
+    return ConsoleReporter().render(rep)
+
+if __name__ == "__main__":
+    raise SystemExit(main())

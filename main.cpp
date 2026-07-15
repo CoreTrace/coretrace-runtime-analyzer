@@ -1,6 +1,7 @@
-#include "your_tool_name.hpp"
+// SPDX-License-Identifier: Apache-2.0
+#include "runtime_analyzer.hpp"
 
-int main(void)
+int main(int argc, char** argv)
 {
-    return 0;
+    return coretrace::runtime_analyzer::Main(argc, argv);
 }

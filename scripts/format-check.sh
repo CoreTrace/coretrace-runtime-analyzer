@@ -8,7 +8,7 @@ files=()
 while IFS= read -r -d '' file; do
     files+=("$file")
 done < <(find "${REPO_ROOT}" \
-    \( -path "${REPO_ROOT}/build" -o -path "${REPO_ROOT}/extern-project" -o -path "${REPO_ROOT}/external" -o -path "${REPO_ROOT}/third_party" -o -path "${REPO_ROOT}/vendor" -o -path "${REPO_ROOT}/.git" \) -prune -o \
+    \( -path "${REPO_ROOT}/build" -o -path "${REPO_ROOT}/test" -o -path "${REPO_ROOT}/runtime-analyzer-artifacts" -o -path "${REPO_ROOT}/extern-project" -o -path "${REPO_ROOT}/external" -o -path "${REPO_ROOT}/third_party" -o -path "${REPO_ROOT}/vendor" -o -path "${REPO_ROOT}/.git" \) -prune -o \
     -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.hxx' \) -print0)
 
 if [ "${#files[@]}" -eq 0 ]; then
