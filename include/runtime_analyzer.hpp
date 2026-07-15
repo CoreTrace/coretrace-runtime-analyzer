@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: Apache-2.0
+#ifndef CORETRACE_RUNTIME_ANALYZER_HPP
+#define CORETRACE_RUNTIME_ANALYZER_HPP
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace coretrace::runtime_analyzer
+{
+    struct AnalyzerOptions
+    {
+        std::vector<std::string> compiler_args;
+        std::vector<std::string> program_args;
+        std::vector<std::string> environment;
+        std::vector<std::string> test_directories;
+        std::string output_path = "runtime-analyzer.out";
+        std::string output_directory = "runtime-analyzer-artifacts";
+        std::string working_directory;
+        bool explicit_output_path = false;
+        bool run_program = true;
+        bool show_program_output = false;
+        bool show_events = false;
+        bool strict_test_exit = false;
+    };
+
+    struct CollectionSummary
+    {
+        std::uint64_t coretrace_lines = 0;
+        std::uint64_t entry_events = 0;
+        std::uint64_t exit_events = 0;
+        std::uint64_t allocation_events = 0;
+        std::uint64_t bounds_errors = 0;
+        std::uint64_t leak_reports = 0;
+        std::uint64_t vtable_events = 0;
+        std::uint64_t warnings = 0;
+        std::uint64_t errors = 0;
+    };
+
+    struct AnalyzerResult
+    {
+        bool success = false;
+        bool compile_success = false;
+        bool executed = false;
+        int exit_code = 1;
+        std::string output_path;
+        std::string diagnostics;
+        std::string stdout_text;
+        std::string stderr_text;
+        std::vector<std::string> coretrace_events;
+        CollectionSummary summary;
+    };
+
+    struct TestFileResult
+    {
+        std::string source_path;
+        AnalyzerResult analyzer_result;
+    };
+
+    struct BatchResult
+    {
+        bool success = false;
+        int exit_code = 1;
+        std::vector<TestFileResult> tests;
+        CollectionSummary summary;
+        std::string diagnostics;
+        std::uint64_t compile_failures = 0;
+        std::uint64_t runtime_failures = 0;
+    };
+
+    [[nodiscard]] AnalyzerResult Run(const AnalyzerOptions& options);
+    [[nodiscard]] BatchResult RunBatch(const AnalyzerOptions& options);
+    [[nodiscard]] int Main(int argc, char** argv);
+} // namespace coretrace::runtime_analyzer
+
+#endif // CORETRACE_RUNTIME_ANALYZER_HPP
