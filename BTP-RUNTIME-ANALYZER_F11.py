@@ -285,7 +285,7 @@ def run_f11_proof(
     collection = parse_collection_summary(completed.stdout)
 
     checks = {
-        "runtime_analyzer_exit_zero": completed.returncode == 0,
+        "runtime_analyzer_reports_findings": completed.returncode == 1,
         "binary_generated": binary.is_file(),
         "binary_executable": os.access(binary, os.X_OK),
         "program_reached_overflow_site": F11_BEFORE_MARKER in combined_output,

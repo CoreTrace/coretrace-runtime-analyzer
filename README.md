@@ -23,6 +23,31 @@ present after `--`.
 The initial collection is intentionally basic: it counts CoreTrace log lines, function entry/exit
 events, allocation events, bounds errors, leak reports, vtable diagnostics, warnings, and errors.
 
+## Findings
+
+Each memory error the runtime reports becomes a finding, available as `AnalyzerResult::findings`
+through the library API:
+
+| Rule | CWE | Location |
+|---|---|---|
+| `heap-buffer-overflow` | CWE-122 (write), CWE-125 (read) | faulting access, allocation site |
+| `stack-buffer-overflow` | CWE-121 (write), CWE-125 (read) | faulting access, the object's function |
+| `heap-use-after-free` | CWE-416 | faulting access, allocation site |
+| `double-free` | CWE-415 | none: the runtime reports no site |
+| `memory-leak` | CWE-401 | none: the runtime reports no site |
+
+The runtime names a file by its base name; a finding takes the path of the compiled source with that
+name. The text summary lists the findings; `--format sarif` prints a SARIF 2.1.0 log instead, for
+code scanning (in `--test-dir` mode, one log with the findings of every program).
+
+The exit status is the analyzer's verdict: `0` without findings, `1` with findings, `2` when the
+program could not be built or run. The program's own status is `exit_code` in the summary.
+
+Stack objects are checked when the bounds module is named, for example with
+`-- --ct-modules=alloc,bounds main.c`.
+
+`ctest --test-dir build` checks each finding kind against the programs in `test/findings/`.
+
 ## Batch Test Directory Mode
 
 Use `--test-dir <path>` to run every `.c`, `.cc`, `.cpp`, and `.cxx` source under a test directory.

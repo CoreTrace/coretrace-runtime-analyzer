@@ -13,6 +13,7 @@ set(TOOL_NAMESPACE "coretrace" CACHE STRING "CMake namespace for ALIAS targets")
 
 # Library sources (add/remove files here)
 set(TOOL_SOURCES
+    src/findings.cpp
     src/runtime_analyzer.cpp
 )
 
@@ -188,4 +189,17 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/format-check.sh"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Verify clang-format compliance")
+endif()
+
+# =======
+#  TESTS
+# =======
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME AND BUILD_CLI)
+  find_package(Python3 COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    enable_testing()
+    add_test(NAME findings
+      COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/findings/check_findings.py"
+              $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/findings")
+  endif()
 endif()

@@ -2,6 +2,7 @@
 #include "runtime_analyzer.hpp"
 
 #include "compilerlib/compiler.h"
+#include "findings.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -11,6 +12,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -30,11 +32,23 @@ namespace coretrace::runtime_analyzer
     {
         constexpr std::string_view kDefaultOutputPath = "runtime-analyzer.out";
 
+        // The analyzer's exit codes; the program's own status stays in AnalyzerResult.
+        constexpr int kExitNoFindings = 0;
+        constexpr int kExitFindings = 1;
+        constexpr int kExitNotAnalyzed = 2;
+
+        enum class OutputFormat
+        {
+            Text,
+            Sarif,
+        };
+
         struct ParseResult
         {
             bool ok = true;
             bool help = false;
             AnalyzerOptions options;
+            OutputFormat format = OutputFormat::Text;
             std::string error;
         };
 
@@ -316,6 +330,24 @@ namespace coretrace::runtime_analyzer
             lhs.warnings += rhs.warnings;
             lhs.errors += rhs.errors;
             return lhs;
+        }
+
+        [[nodiscard]] std::vector<std::string>
+        SourceArguments(const std::vector<std::string>& compiler_args)
+        {
+            std::vector<std::string> sources;
+            std::ranges::copy_if(compiler_args, std::back_inserter(sources),
+                                 [](const std::string& arg) { return IsSourceFile(arg); });
+            return sources;
+        }
+
+        [[nodiscard]] int Verdict(const AnalyzerResult& result, bool run_program)
+        {
+            if (!result.compile_success || (run_program && !result.executed))
+            {
+                return kExitNotAnalyzed;
+            }
+            return result.findings.empty() ? kExitNoFindings : kExitFindings;
         }
 
         [[nodiscard]] std::string SanitizeArtifactName(const std::filesystem::path& path)
@@ -647,7 +679,11 @@ namespace coretrace::runtime_analyzer
                 << "  --no-run                  Compile only, without executing the binary\n"
                 << "  --show-output             Print captured stdout/stderr after the summary\n"
                 << "  --show-events             Print collected CoreTrace event lines\n"
+                << "  --format <text|sarif>     Print a text summary (default) or a SARIF log "
+                   "of the findings\n"
                 << "  -h, --help                Show this help\n\n"
+                << "Exit status: 0 without findings, 1 with findings, 2 when the program could "
+                   "not be built or run.\n\n"
                 << "Example:\n"
                 << "  runtime-analyzer -o ./app -- --ct-modules=trace,alloc,bounds main.c\n";
         }
@@ -776,6 +812,26 @@ namespace coretrace::runtime_analyzer
                     result.options.show_events = true;
                     continue;
                 }
+                if (arg == "--format" || arg.rfind("--format=", 0) == 0)
+                {
+                    std::string value;
+                    if (arg != "--format")
+                    {
+                        value = arg.substr(9);
+                    }
+                    else if (i + 1 < argc)
+                    {
+                        value = argv[++i];
+                    }
+                    if (value == "text" || value == "sarif")
+                    {
+                        result.format = value == "sarif" ? OutputFormat::Sarif : OutputFormat::Text;
+                        continue;
+                    }
+                    result.ok = false;
+                    result.error = "--format requires text or sarif";
+                    return result;
+                }
 
                 result.ok = false;
                 result.error =
@@ -793,10 +849,44 @@ namespace coretrace::runtime_analyzer
             return result;
         }
 
+        void PrintLocation(const SourceLocation& location)
+        {
+            std::cout << location.file << ':' << location.line;
+            if (location.column != 0)
+            {
+                std::cout << ':' << location.column;
+            }
+            std::cout << ": ";
+        }
+
+        // One compiler-style line per finding, the allocation site as a note below it.
+        void PrintFindings(const std::vector<Finding>& findings, std::string_view indent)
+        {
+            for (const Finding& finding : findings)
+            {
+                std::cout << indent;
+                if (finding.location)
+                {
+                    PrintLocation(*finding.location);
+                }
+                std::cout << (finding.severity == Severity::Error ? "error: " : "warning: ")
+                          << finding.message << " [" << finding.rule << ", " << finding.cwe
+                          << "]\n";
+                if (finding.allocation)
+                {
+                    std::cout << indent << "  ";
+                    PrintLocation(*finding.allocation);
+                    std::cout << "note: allocated here\n";
+                }
+            }
+        }
+
         void PrintResult(const AnalyzerResult& result, const AnalyzerOptions& options)
         {
             std::cout << "runtime-analyzer: binary=" << result.output_path << '\n';
             std::cout << "runtime-analyzer: exit_code=" << result.exit_code << '\n';
+            std::cout << "runtime-analyzer: findings=" << result.findings.size() << '\n';
+            PrintFindings(result.findings, "  ");
             std::cout << "runtime-analyzer: collection\n";
             std::cout << "  coretrace_lines=" << result.summary.coretrace_lines << '\n';
             std::cout << "  entry_events=" << result.summary.entry_events << '\n';
@@ -868,6 +958,7 @@ namespace coretrace::runtime_analyzer
                           << " exit_code=" << analyzer.exit_code
                           << " coretrace_lines=" << analyzer.summary.coretrace_lines
                           << " binary=" << analyzer.output_path << '\n';
+                PrintFindings(analyzer.findings, "  ");
 
                 if (options.show_events && !analyzer.coretrace_events.empty())
                 {
@@ -950,6 +1041,14 @@ namespace coretrace::runtime_analyzer
                                        std::make_move_iterator(stderr_events.begin()),
                                        std::make_move_iterator(stderr_events.end()));
 
+        const std::vector<std::string> sources = SourceArguments(compiler_args);
+        for (const std::string* text : {&result.stdout_text, &result.stderr_text})
+        {
+            std::vector<Finding> findings = ParseFindings(StripAnsi(*text), sources);
+            result.findings.insert(result.findings.end(), std::make_move_iterator(findings.begin()),
+                                   std::make_move_iterator(findings.end()));
+        }
+
         result.success = result.exit_code == 0;
         return result;
     }
@@ -984,6 +1083,7 @@ namespace coretrace::runtime_analyzer
             return batch;
         }
 
+        int verdict = kExitNoFindings;
         for (const std::filesystem::path& source : sources)
         {
             AnalyzerOptions test_options = options;
@@ -1019,13 +1119,14 @@ namespace coretrace::runtime_analyzer
             {
                 ++batch.runtime_failures;
             }
+            verdict = std::max(verdict, Verdict(analyzer, options.run_program));
             batch.summary = MergeSummaries(batch.summary, analyzer.summary);
             batch.tests.push_back(TestFileResult{source.string(), std::move(analyzer)});
         }
 
         const bool runtime_ok = options.strict_test_exit ? batch.runtime_failures == 0 : true;
         batch.success = batch.compile_failures == 0 && runtime_ok;
-        batch.exit_code = batch.success ? 0 : 1;
+        batch.exit_code = runtime_ok ? verdict : std::max(verdict, kExitFindings);
         return batch;
     }
 
@@ -1041,7 +1142,7 @@ namespace coretrace::runtime_analyzer
         {
             std::cerr << "runtime-analyzer: " << parsed.error << '\n';
             PrintHelp(std::cerr);
-            return 2;
+            return kExitNotAnalyzed;
         }
 
         if (!parsed.options.test_directories.empty())
@@ -1055,7 +1156,20 @@ namespace coretrace::runtime_analyzer
                     std::cerr << '\n';
                 }
             }
-            PrintBatchResult(result, parsed.options);
+            if (parsed.format == OutputFormat::Sarif)
+            {
+                std::vector<Finding> findings;
+                for (const TestFileResult& test : result.tests)
+                {
+                    findings.insert(findings.end(), test.analyzer_result.findings.begin(),
+                                    test.analyzer_result.findings.end());
+                }
+                WriteSarif(std::cout, findings);
+            }
+            else
+            {
+                PrintBatchResult(result, parsed.options);
+            }
             return result.exit_code;
         }
 
@@ -1073,7 +1187,14 @@ namespace coretrace::runtime_analyzer
         {
             result.output_path = parsed.options.output_path;
         }
-        PrintResult(result, parsed.options);
-        return result.success ? 0 : result.exit_code;
+        if (parsed.format == OutputFormat::Sarif)
+        {
+            WriteSarif(std::cout, result.findings);
+        }
+        else
+        {
+            PrintResult(result, parsed.options);
+        }
+        return Verdict(result, parsed.options.run_program);
     }
 } // namespace coretrace::runtime_analyzer
