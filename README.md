@@ -87,22 +87,6 @@ python3 BTP-RUNTIME-ANALYZER_F4.py
 python3 BTP-RUNTIME-ANALYZER_F4.py --build-first
 ```
 
-## F11 Bounds Overflow Proof
-
-`BTP-RUNTIME-ANALYZER_F11.py` proves runtime overflow detection through CoreTrace bounds
-instrumentation. It uses an existing `ct_bounds_overflow` fixture if one is present in `test/`;
-otherwise it generates a small heap-overflow probe in `runtime-analyzer-artifacts/`.
-
-```zsh
-python3 BTP-RUNTIME-ANALYZER_F11.py
-python3 BTP-RUNTIME-ANALYZER_F11.py --no-color
-```
-
-The proof expects a generated instrumented binary, a runtime `heap-buffer-overflow` report, and a
-non-zero `bounds_errors` collection count. Status checks print the tested file name in purple,
-green `OK` for validated conditions, red `NO` for missing conditions, and separate file reports
-with `--------`.
-
 ## Code style (clang-format)
 
 - Version cible : `clang-format` 17 (utilisée dans la CI).
