@@ -216,6 +216,9 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
       add_test(NAME findings
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/findings/check_findings.py"
                 $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/findings")
+      add_test(NAME timeout
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/timeout/check_timeout.py"
+                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/timeout")
     endif()
   endif()
 endif()

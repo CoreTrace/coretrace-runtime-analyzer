@@ -2,6 +2,7 @@
 #ifndef CORETRACE_RUNTIME_ANALYZER_HPP
 #define CORETRACE_RUNTIME_ANALYZER_HPP
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -18,6 +19,7 @@ namespace coretrace::runtime_analyzer
         std::string output_path = "runtime-analyzer.out";
         std::string output_directory = "runtime-analyzer-artifacts";
         std::string working_directory;
+        std::chrono::milliseconds timeout{60000}; // per program run; 0 disables the limit
         bool explicit_output_path = false;
         bool run_program = true;
         bool show_program_output = false;
@@ -67,7 +69,8 @@ namespace coretrace::runtime_analyzer
         bool success = false;
         bool compile_success = false;
         bool executed = false;
-        int exit_code = 1; // the program's own exit status
+        bool timed_out = false; // the run passed the timeout and was killed
+        int exit_code = 1;      // the program's own exit status
         std::string output_path;
         std::string diagnostics;
         std::string stdout_text;
@@ -94,6 +97,7 @@ namespace coretrace::runtime_analyzer
         std::string diagnostics;
         std::uint64_t compile_failures = 0;
         std::uint64_t runtime_failures = 0;
+        std::uint64_t timeouts = 0;
     };
 
     [[nodiscard]] AnalyzerResult Run(const AnalyzerOptions& options);

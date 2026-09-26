@@ -7,12 +7,15 @@
 #include "sarif.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -320,7 +323,12 @@ namespace coretrace::runtime_analyzer
             {
                 return kExitNotAnalyzed;
             }
-            return result.findings.empty() ? kExitNoFindings : kExitFindings;
+            if (!result.findings.empty())
+            {
+                return kExitFindings;
+            }
+            // A program killed at the timeout was not analyzed to completion.
+            return result.timed_out ? kExitNotAnalyzed : kExitNoFindings;
         }
 
         [[nodiscard]] std::string SanitizeArtifactName(const std::filesystem::path& path)
@@ -436,6 +444,8 @@ namespace coretrace::runtime_analyzer
                 << "  --env NAME=VALUE          Environment variable passed to the "
                    "instrumented binary\n"
                 << "  --cwd <path>              Working directory used when running the binary\n"
+                << "  --timeout <seconds>       Kill the binary after this long (default 60, 0 "
+                   "disables)\n"
                 << "  --test-dir <path>         Run every C/C++ source file under a test "
                    "directory\n"
                 << "  --output-dir <path>       Artifact directory used by --test-dir\n"
@@ -533,6 +543,33 @@ namespace coretrace::runtime_analyzer
                         return result;
                     }
                     result.options.working_directory = argv[++i];
+                    continue;
+                }
+                if (arg == "--timeout")
+                {
+                    if (i + 1 >= argc)
+                    {
+                        result.ok = false;
+                        result.error = "--timeout requires a number of seconds";
+                        return result;
+                    }
+                    const std::string value = argv[++i];
+                    std::size_t consumed = 0;
+                    long long seconds = -1;
+                    try
+                    {
+                        seconds = std::stoll(value, &consumed);
+                    }
+                    catch (const std::exception&)
+                    {
+                    }
+                    if (consumed != value.size() || seconds < 0)
+                    {
+                        result.ok = false;
+                        result.error = "--timeout requires a non-negative number of seconds";
+                        return result;
+                    }
+                    result.options.timeout = std::chrono::seconds(seconds);
                     continue;
                 }
                 if (arg == "--test-dir")
@@ -650,6 +687,7 @@ namespace coretrace::runtime_analyzer
         {
             std::cout << "runtime-analyzer: binary=" << result.output_path << '\n';
             std::cout << "runtime-analyzer: exit_code=" << result.exit_code << '\n';
+            std::cout << "runtime-analyzer: timed_out=" << (result.timed_out ? 1 : 0) << '\n';
             std::cout << "runtime-analyzer: findings=" << result.findings.size() << '\n';
             PrintFindings(result.findings, "  ");
             std::cout << "runtime-analyzer: collection\n";
@@ -707,6 +745,7 @@ namespace coretrace::runtime_analyzer
             std::cout << "  tests=" << result.tests.size() << '\n';
             std::cout << "  compile_failures=" << result.compile_failures << '\n';
             std::cout << "  runtime_failures=" << result.runtime_failures << '\n';
+            std::cout << "  timeouts=" << result.timeouts << '\n';
             std::cout << "  coretrace_lines=" << result.summary.coretrace_lines << '\n';
             std::cout << "  entry_events=" << result.summary.entry_events << '\n';
             std::cout << "  exit_events=" << result.summary.exit_events << '\n';
@@ -724,6 +763,10 @@ namespace coretrace::runtime_analyzer
                 if (!analyzer.compile_success)
                 {
                     status = "COMPILE";
+                }
+                else if (analyzer.timed_out)
+                {
+                    status = "TIMEOUT";
                 }
                 else if (!analyzer.success)
                 {
@@ -790,11 +833,18 @@ namespace coretrace::runtime_analyzer
 
         ProcessResult process =
             RunProcess({AbsolutePathForExecution(output_path), options.program_args,
-                        options.environment, options.working_directory});
+                        options.environment, options.working_directory, options.timeout});
         result.stdout_text = std::move(process.stdout_text);
         result.stderr_text = std::move(process.stderr_text);
         result.exit_code = process.exit_code;
         result.executed = process.error.empty();
+        result.timed_out = process.timed_out;
+        if (process.timed_out)
+        {
+            const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(options.timeout);
+            result.diagnostics +=
+                "program timed out after " + std::to_string(seconds.count()) + " s\n";
+        }
         if (!process.error.empty())
         {
             result.diagnostics += process.error;
@@ -890,6 +940,10 @@ namespace coretrace::runtime_analyzer
             if (!analyzer.compile_success)
             {
                 ++batch.compile_failures;
+            }
+            else if (analyzer.timed_out)
+            {
+                ++batch.timeouts;
             }
             else if (analyzer.exit_code != 0)
             {
