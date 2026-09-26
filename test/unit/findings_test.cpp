@@ -169,6 +169,138 @@ namespace
                           "  alloc_size=16 alloc_site=a.c:4:19 base=0x0\n");
         Expect(findings.empty(), "tracing lines: no finding");
     }
+
+    // The vtable module logs each suspicious virtual call or vtable access as a box, at WARN
+    // level when it lists warnings.
+    constexpr std::string_view kNullThisBox =
+        "|72292| ==ct== [WARN] [VTABLE]\n"
+        "|72292| ==ct== [WARN] ┌─ vtable ─────────────────────────────┐\n"
+        "|72292| ==ct== [WARN] │ site   : ct_vtable_diag_null.cpp:7:5 │\n"
+        "|72292| ==ct== [WARN] │ this   : <null>                      │\n"
+        "|72292| ==ct== [WARN] │ type   : <unknown>                   │\n"
+        "|72292| ==ct== [WARN] │ static : Base                        │\n"
+        "|72292| ==ct== [WARN] │ warn   : null this pointer           │\n"
+        "|72292| ==ct== [WARN] │ warn   : no vptr                     │\n"
+        "|72292| ==ct== [WARN] └──────────────────────────────────────┘\n";
+
+    void VtableWarningBoxIsAFinding()
+    {
+        const std::vector<Finding> findings = ParseFindings(kNullThisBox);
+        Expect(findings.size() == 1, "vtable null this: one finding");
+        if (findings.size() != 1)
+        {
+            return;
+        }
+        Expect(findings[0].rule == "vtable-null-this", "vtable null this: most specific rule");
+        Expect(findings[0].cwe == "CWE-476", "vtable null this: CWE-476");
+        Expect(findings[0].severity == Severity::Error, "vtable null this: error");
+        Expect(findings[0].message == "null this pointer; no vptr",
+               "vtable null this: message lists the box's warnings");
+        Expect(IsAt(findings[0].location, "ct_vtable_diag_null.cpp", 7, 5),
+               "vtable null this: site");
+        Expect(!findings[0].allocation, "vtable null this: no allocation site");
+    }
+
+    void VtableInfoBoxIsTracing()
+    {
+        const std::vector<Finding> findings =
+            ParseFindings("|1| ==ct== [INFO] [VCALL]\n"
+                          "|1| ==ct== [INFO] ┌─ vcall ───────────────────────────────┐\n"
+                          "|1| ==ct== [INFO] │ site      : ct_vtable_basic.cpp:24:20 │\n"
+                          "|1| ==ct== [INFO] │ type      : Derived                   │\n"
+                          "|1| ==ct== [INFO] │ vmod      : main                      │\n"
+                          "|1| ==ct== [INFO] └───────────────────────────────────────┘\n");
+        Expect(findings.empty(), "vtable info box: no finding");
+    }
+
+    void VcallBoxJoinsWrappedValues()
+    {
+        const std::vector<Finding> findings = ParseFindings(
+            "|1| ==ct== [WARN] [VCALL]\n"
+            "|1| ==ct== [WARN] ┌─ vcall ──────────────────────────────────────────────┐\n"
+            "|1| ==ct== [WARN] │ site      : ct_vtable_diag_mismatch.cpp:24:5         │\n"
+            "|1| ==ct== [WARN] │ type      : Derived                                  │\n"
+            "|1| ==ct== [WARN] │ static    : Base                                     │\n"
+            "|1| ==ct== [WARN] │ warn      : static!=dynamic type                     │\n"
+            "|1| ==ct== [WARN] │ warn      : module mismatch: vtable=main target=libs │\n"
+            "|1| ==ct== [WARN] │           : ystem_c.dylib                            │\n"
+            "|1| ==ct== [WARN] └──────────────────────────────────────────────────────┘\n");
+        Expect(findings.size() == 1, "vcall mismatch: one finding");
+        if (findings.size() != 1)
+        {
+            return;
+        }
+        Expect(findings[0].rule == "vtable-type-mismatch", "vcall mismatch: rule");
+        Expect(findings[0].cwe == "CWE-843", "vcall mismatch: CWE-843");
+        Expect(findings[0].severity == Severity::Warning, "vcall mismatch: warning");
+        Expect(findings[0].message ==
+                   "static!=dynamic type; module mismatch: vtable=main target=libsystem_c.dylib",
+               "vcall mismatch: wrapped value joined");
+        Expect(IsAt(findings[0].location, "ct_vtable_diag_mismatch.cpp", 24, 5),
+               "vcall mismatch: site");
+    }
+
+    [[nodiscard]] std::vector<Finding> WarnBox(std::string_view tag, std::string_view warnings)
+    {
+        std::string output;
+        output += "|1| ==ct== [WARN] [" + std::string(tag) + "]\n";
+        output += "|1| ==ct== [WARN] ┌─ box ──────┐\n";
+        output += "|1| ==ct== [WARN] │ site : a.cpp:22:5 │\n";
+        for (std::size_t start = 0; start < warnings.size();)
+        {
+            std::size_t end = warnings.find('|', start);
+            if (end == std::string_view::npos)
+            {
+                end = warnings.size();
+            }
+            output +=
+                "|1| ==ct== [WARN] │ warn : " + std::string(warnings.substr(start, end - start)) +
+                " │\n";
+            start = end + 1;
+        }
+        output += "|1| ==ct== [WARN] └────────────┘\n";
+        return ParseFindings(output);
+    }
+
+    void VtableRulesByWarning()
+    {
+        struct Case
+        {
+            std::string_view warnings;
+            std::string_view rule;
+            std::string_view cwe;
+            Severity severity;
+        };
+        constexpr Case cases[] = {
+            {"vptr on freed object", "vtable-use-after-free", "CWE-416", Severity::Error},
+            {"missing typeinfo|vtable resolve failed", "vtable-corrupted", "CWE-843",
+             Severity::Error},
+            {"no vptr", "vtable-corrupted", "CWE-843", Severity::Error},
+            {"target in non-exec memory", "vcall-invalid-target", "CWE-843", Severity::Error},
+            {"static!=dynamic type", "vtable-type-mismatch", "CWE-843", Severity::Warning},
+            {"module mismatch: vtable=main target=libs", "vtable-type-mismatch", "CWE-843",
+             Severity::Warning},
+            // The most specific warning decides.
+            {"no vptr|vptr on freed object", "vtable-use-after-free", "CWE-416", Severity::Error},
+            {"static!=dynamic type|target in non-exec memory", "vcall-invalid-target", "CWE-843",
+             Severity::Error},
+        };
+        for (const Case& c : cases)
+        {
+            const std::vector<Finding> findings = WarnBox("VCALL", c.warnings);
+            std::string message(c.warnings);
+            for (std::size_t bar = message.find('|'); bar != std::string::npos;
+                 bar = message.find('|'))
+            {
+                message.replace(bar, 1, "; ");
+            }
+            const std::string what = "vtable rule for \"" + message + "\"";
+            Expect(findings.size() == 1 && findings[0].rule == c.rule && findings[0].cwe == c.cwe &&
+                       findings[0].severity == c.severity && findings[0].message == message &&
+                       IsAt(findings[0].location, "a.cpp", 22, 5),
+                   what);
+        }
+    }
 } // namespace
 
 int main()
@@ -181,6 +313,10 @@ int main()
     DoubleFree();
     MemoryLeak();
     TracingLinesAreNotFindings();
+    VtableWarningBoxIsAFinding();
+    VtableInfoBoxIsTracing();
+    VcallBoxJoinsWrappedValues();
+    VtableRulesByWarning();
     if (failures != 0)
     {
         std::cerr << failures << " check(s) failed\n";

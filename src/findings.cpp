@@ -3,6 +3,7 @@
 
 #include <charconv>
 #include <optional>
+#include <string>
 #include <utility>
 
 namespace coretrace::runtime_analyzer
@@ -86,6 +87,128 @@ namespace coretrace::runtime_analyzer
             return location;
         }
 
+        // A vtable diagnostic box's warning and the finding it names. The box's rule is the
+        // earliest entry here matched by any of its warnings, so the most specific one wins.
+        struct VtableRule
+        {
+            std::string_view warning; // matched as a prefix of the box's "warn" values
+            std::string_view rule;
+            std::string_view cwe;
+            Severity severity;
+        };
+
+        constexpr VtableRule kVtableRules[] = {
+            {"null this pointer", "vtable-null-this", "CWE-476", Severity::Error},
+            {"vptr on freed object", "vtable-use-after-free", "CWE-416", Severity::Error},
+            {"vtable resolve failed", "vtable-corrupted", "CWE-843", Severity::Error},
+            {"no vptr", "vtable-corrupted", "CWE-843", Severity::Error},
+            {"missing typeinfo", "vtable-corrupted", "CWE-843", Severity::Error},
+            {"target in non-exec memory", "vcall-invalid-target", "CWE-843", Severity::Error},
+            {"static!=dynamic type", "vtable-type-mismatch", "CWE-843", Severity::Warning},
+            {"module mismatch: ", "vtable-type-mismatch", "CWE-843", Severity::Warning},
+        };
+
+        // A box the runtime logged at WARN level: "[VTABLE]" or "[VCALL]", then "│ label : value │"
+        // rows between "┌" and "└". A row with an empty label continues the previous value.
+        struct DiagnosticBox
+        {
+            std::vector<std::pair<std::string, std::string>> rows;
+
+            [[nodiscard]] static bool Opens(std::string_view line)
+            {
+                return line.find("[WARN]") != std::string_view::npos &&
+                       (line.ends_with("[VTABLE]") || line.ends_with("[VCALL]"));
+            }
+
+            [[nodiscard]] static bool Closes(std::string_view line)
+            {
+                return line.find("└") != std::string_view::npos;
+            }
+
+            void AddRow(std::string_view line)
+            {
+                constexpr std::string_view kOpen = "│ ";
+                constexpr std::string_view kClose = " │";
+                const std::size_t open = line.find(kOpen);
+                const std::size_t close = line.rfind(kClose);
+                if (open == std::string_view::npos || close == std::string_view::npos ||
+                    close < open + kOpen.size())
+                {
+                    return;
+                }
+                const std::string_view text =
+                    line.substr(open + kOpen.size(), close - open - kOpen.size());
+                const std::size_t colon = text.find(':');
+                if (colon == std::string_view::npos)
+                {
+                    return;
+                }
+                const std::string label = Trim(text.substr(0, colon));
+                const std::string value = Trim(text.substr(colon + 1));
+                if (label.empty() && !rows.empty())
+                {
+                    rows.back().second += value;
+                }
+                else
+                {
+                    rows.emplace_back(label, value);
+                }
+            }
+
+            [[nodiscard]] std::optional<Finding> ToFinding() const
+            {
+                Finding finding;
+                const VtableRule* rule = nullptr;
+                for (const auto& [label, value] : rows)
+                {
+                    if (label == "site")
+                    {
+                        finding.location = ParseSite(value);
+                        continue;
+                    }
+                    if (label != "warn")
+                    {
+                        continue;
+                    }
+                    if (!finding.message.empty())
+                    {
+                        finding.message += "; ";
+                    }
+                    finding.message += value;
+                    for (const VtableRule& candidate : kVtableRules)
+                    {
+                        if (value.starts_with(candidate.warning))
+                        {
+                            if (rule == nullptr || &candidate < rule)
+                            {
+                                rule = &candidate;
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (finding.message.empty())
+                {
+                    return std::nullopt;
+                }
+                finding.rule = rule != nullptr ? rule->rule : "vtable-diagnostic";
+                finding.cwe = rule != nullptr ? rule->cwe : "CWE-843";
+                finding.severity = rule != nullptr ? rule->severity : Severity::Warning;
+                return finding;
+            }
+
+          private:
+            [[nodiscard]] static std::string Trim(std::string_view text)
+            {
+                const std::size_t first = text.find_first_not_of(' ');
+                if (first == std::string_view::npos)
+                {
+                    return {};
+                }
+                return std::string(text.substr(first, text.find_last_not_of(' ') - first + 1));
+            }
+        };
+
         [[nodiscard]] std::optional<Finding> BoundsFinding(std::string_view line)
         {
             for (const BoundsRule& rule : kBoundsRules)
@@ -132,6 +255,7 @@ namespace coretrace::runtime_analyzer
     {
         std::vector<Finding> findings;
         bool in_bounds_report = false;
+        std::optional<DiagnosticBox> box;
         std::size_t start = 0;
         while (start < output.size())
         {
@@ -142,6 +266,29 @@ namespace coretrace::runtime_analyzer
             }
             const std::string_view line = output.substr(start, end - start);
             start = end + 1;
+
+            if (box)
+            {
+                if (DiagnosticBox::Closes(line))
+                {
+                    if (std::optional<Finding> finding = box->ToFinding())
+                    {
+                        findings.push_back(std::move(*finding));
+                    }
+                    box.reset();
+                }
+                else
+                {
+                    box->AddRow(line);
+                }
+                continue;
+            }
+            if (DiagnosticBox::Opens(line))
+            {
+                in_bounds_report = false;
+                box.emplace();
+                continue;
+            }
 
             // A bounds report goes on over indented lines that carry no log prefix.
             if (in_bounds_report && line.starts_with("  "))
