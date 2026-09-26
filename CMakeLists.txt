@@ -51,7 +51,7 @@ set(CORETRACE_COMPILER_GIT_TAG "41de24ae3f4f4091df63dfd323f7176c6efb9359" CACHE 
 # END PROJECT CONFIG
 # ------------------------------
 
-project(${TOOL_NAME} LANGUAGES C CXX)
+project(${TOOL_NAME} VERSION 0.1.0 LANGUAGES C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(CheckLLVMVersion)
@@ -64,6 +64,11 @@ find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 check_llvm_version(${LLVM_MIN_REQUIRED_VERSION})
+
+# The version the CLI prints and a release tag must agree with.
+set(TOOL_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+configure_file(cmake/runtime_analyzer_version.hpp.in
+               "${TOOL_GENERATED_INCLUDE_DIR}/runtime_analyzer_version.hpp" @ONLY)
 
 include(FetchContent)
 
@@ -120,6 +125,7 @@ function(coretrace_add_tool)
     target_include_directories(${_lib_target}
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${TOOL_GENERATED_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:include>
             ${LLVM_INCLUDE_DIRS}
     )
@@ -176,6 +182,22 @@ coretrace_add_tool(
     CLI_SOURCE    ${TOOL_CLI_SOURCE}
     LLVM_COMPONENTS ${LLVM_COMPONENTS}
 )
+
+# =========
+#  INSTALL
+# =========
+# coretrace-compiler's own rules install bin/cc, lib/libct_instrument_runtime.a and
+# lib/libcoretrace_logger.a beside these; the installed CLI links instrumented programs against
+# the archives found in ../lib relative to itself, so the prefix can be moved.
+install(TARGETS ${TOOL_NAME}_lib
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+)
+if(BUILD_CLI)
+  install(TARGETS ${TOOL_NAME} RUNTIME DESTINATION bin)
+endif()
+install(DIRECTORY include/ DESTINATION include)
+install(FILES "${TOOL_GENERATED_INCLUDE_DIR}/runtime_analyzer_version.hpp" DESTINATION include)
 
 # ============
 #  FORMATTING
@@ -248,6 +270,10 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
       PASS_REGULAR_EXPRESSION "runtime-analyzer: batch"
       FAIL_REGULAR_EXPRESSION "\\[TIMEOUT\\];\\[COMPILE\\]")
 
+    # The CLI states the version a release tag must agree with.
+    add_test(NAME version
+      COMMAND sh -c "\"$<TARGET_FILE:${TOOL_NAME}>\" --version | grep -x '${TOOL_NAME} ${PROJECT_VERSION}'")
+
     # Configuration fails, rather than warns, against an LLVM below the floor.
     add_test(NAME llvm_floor
       COMMAND ${CMAKE_COMMAND} -S "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -256,5 +282,11 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     set_tests_properties(llvm_floor PROPERTIES
       PASS_REGULAR_EXPRESSION "needs LLVM 99 or later")
 
+    # An installed prefix holds the CLI, the library and the headers, and its CLI builds and
+    # runs an instrumented program with the runtime archives installed next to it.
+    set(_prefix "${CMAKE_CURRENT_BINARY_DIR}/prefix")
+    add_test(NAME install_layout
+      COMMAND sh -c "rm -rf \"${_prefix}\" && ${CMAKE_COMMAND} --install \"${CMAKE_CURRENT_BINARY_DIR}\" --prefix \"${_prefix}\" > /dev/null && test -f \"${_prefix}/lib/lib${TOOL_NAME}_lib.a\" && test -f \"${_prefix}/include/runtime_analyzer.hpp\" && test -f \"${_prefix}/include/runtime_analyzer_version.hpp\" && \"${_prefix}/bin/${TOOL_NAME}\" --version && \"${_prefix}/bin/${TOOL_NAME}\" -o \"${_prefix}/hello\" -- test/examples/fixtures/hello.c"
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 endif()
