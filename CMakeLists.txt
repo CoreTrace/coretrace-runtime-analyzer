@@ -1,5 +1,6 @@
 
-cmake_minimum_required(VERSION 3.16)
+# 3.21 for install(RUNTIME_DEPENDENCY_SET).
+cmake_minimum_required(VERSION 3.21)
 
 # ============================================================================
 #  CoreTrace Runtime Analyzer
@@ -195,7 +196,31 @@ install(TARGETS ${TOOL_NAME}_lib
   LIBRARY DESTINATION lib
 )
 if(BUILD_CLI)
-  install(TARGETS ${TOOL_NAME} RUNTIME DESTINATION bin)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # The archive is self-contained: the LLVM libraries the CLI links (libLLVM, libclang-cpp)
+    # are copied into lib/, found through the rpath. libstdc++ and libgcc_s are shipped too,
+    # as the build compiler may be newer than the target's and they are backward compatible.
+    # glibc stays the system's: the archive runs on any glibc at least as old as the build
+    # machine's.
+    set_target_properties(${TOOL_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
+    install(TARGETS ${TOOL_NAME}
+      RUNTIME_DEPENDENCY_SET ${TOOL_NAME}_deps
+      RUNTIME DESTINATION bin
+    )
+    install(RUNTIME_DEPENDENCY_SET ${TOOL_NAME}_deps
+      PRE_EXCLUDE_REGEXES
+        "^libc\\.so"
+        "^libm\\.so"
+        "^libdl\\.so"
+        "^librt\\.so"
+        "^libpthread\\.so"
+        "^ld-linux"
+      DIRECTORIES ${LLVM_LIBRARY_DIRS}
+      LIBRARY DESTINATION lib
+    )
+  else()
+    install(TARGETS ${TOOL_NAME} RUNTIME DESTINATION bin)
+  endif()
   # Clang's headers next to the CLI, so that no clang is needed where it runs.
   include(ClangHeaders)
 endif()
