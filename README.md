@@ -36,24 +36,26 @@ static analyzers report paths from.
 
 ### From a release
 
-Each [release](https://github.com/CoreTrace/coretrace-runtime-analyzer/releases) carries
-`runtime-analyzer-linux-x86_64.tar.gz` and its `SHA256SUMS`:
+Each [release](https://github.com/CoreTrace/coretrace-runtime-analyzer/releases) carries a
+self-contained Linux archive per architecture, `runtime-analyzer-<version>-linux-amd64.tar.gz`
+and `runtime-analyzer-<version>-linux-arm64.tar.gz`, each with its `.sha256`:
 
 ```zsh
-sha256sum -c SHA256SUMS
-tar -xzf runtime-analyzer-linux-x86_64.tar.gz
-./runtime-analyzer/bin/runtime-analyzer --version
+sha256sum -c runtime-analyzer-v0.1.0-linux-amd64.tar.gz.sha256
+tar -xzf runtime-analyzer-v0.1.0-linux-amd64.tar.gz
+./runtime-analyzer-v0.1.0-linux-amd64/bin/runtime-analyzer --version
 ```
 
-The tree holds `bin/runtime-analyzer`, the instrumentation runtime archives in `lib/` that
-instrumented programs are linked against, and the library with its headers. The CLI finds the
-archives relative to its own location, so the tree can be moved. At run time it needs:
+The tree holds `bin/runtime-analyzer`, the LLVM libraries it links and the instrumentation
+runtime archives in `lib/`, Clang's own headers in `lib/clang/<version>/include`, and the
+library with its headers. Everything is found relative to the CLI's own location, so the tree can
+be moved. No clang and no LLVM have to be installed: the CLI points coretrace-compiler at the
+shipped headers unless `CT_CLANG` names another clang.
 
-- the LLVM 20 shared libraries it was built against, `libLLVM.so.20.1` and `libclang-cpp.so.20.1`
-  (on Debian and Ubuntu, the `libllvm20` and `libclang-cpp20` packages from
-  [apt.llvm.org](https://apt.llvm.org));
-- a `clang` to link instrumented programs: `clang-20`, `clang` or `clang++` on `PATH`, or the
-  executable `CT_CLANG` names.
+The archive is built on Ubuntu 22.04 and runs on it and on every newer distribution (Debian 12,
+RHEL 9 and rebuilds, Ubuntu 24.04...). What stays the system's is a C++ build environment to
+link each instrumented program against the runtime, which is C++: `g++` on Debian and Ubuntu,
+`gcc-c++` on RHEL, as for building any C++ program.
 
 ### From source
 
@@ -223,7 +225,8 @@ ctest --test-dir build --output-on-failure
 | `sweep_runs` | every binary runs without a timeout (`--test-dir test --timeout 10 -- --ct-modules=alloc`) |
 | `version` | `--version` prints the `project()` version |
 | `llvm_floor` | configuration fails against an LLVM below the floor |
-| `install_layout` | `cmake --install` lays out the CLI, library and headers, and the installed CLI builds and runs a program |
+| `shipped_toolchain_unit` | the CLI points coretrace-compiler at the Clang headers shipped next to it, unless `CT_CLANG` is set |
+| `install_layout` | `cmake --install` lays out the CLI, library, headers and Clang headers, and the installed CLI builds and runs a program |
 
 The `Build` workflow runs this suite on Ubuntu 24.04 and macOS against LLVM 20 for every push and
 pull request. `clang-format` (version 17) is checked by the `clang-format` workflow.
@@ -233,9 +236,13 @@ pull request. `clang-format` (version 17) is checked by the `clang-format` workf
 1. Set the version in `project(... VERSION x.y.z ...)` in `CMakeLists.txt` and merge it.
 2. Tag the commit `vx.y.z` and push the tag.
 
-The `Release` workflow checks that the tag matches the project version, builds and tests on
-Ubuntu 24.04, installs the tree with `cmake --install`, and attaches
-`runtime-analyzer-linux-x86_64.tar.gz` with `SHA256SUMS` to the GitHub Release.
+The `Release` workflow checks that the tag matches the project version, then builds the
+archives with `Dockerfile.release` for amd64 and arm64: an Ubuntu 22.04 base with GCC 13 and
+LLVM 20, the test suite, `cmake --install` with the LLVM libraries and Clang headers shipped,
+`patchelf` for the rpaths, and a run of `test/release/check-analysis.sh` on bare Ubuntu 22.04,
+Debian 12, Rocky Linux 9 and Ubuntu 24.04 images with only `g++` installed. The archives and
+their `.sha256` are attached to the GitHub Release. The same build runs on every pull request
+that touches the release files, without publishing.
 
 ## License
 

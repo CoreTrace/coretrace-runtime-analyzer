@@ -6,6 +6,9 @@
 #include "findings.hpp"
 #include "process.hpp"
 #include "sarif.hpp"
+#include "shipped_toolchain.hpp"
+
+#include <llvm/Support/FileSystem.h>
 
 #include <algorithm>
 #include <chrono>
@@ -980,6 +983,19 @@ namespace coretrace::runtime_analyzer
         {
             std::cout << "runtime-analyzer " << kVersion << '\n';
             return 0;
+        }
+
+        // An installed CLI carries Clang's headers and the C++ runtime next to itself; a
+        // build-tree one does not, and coretrace-compiler then falls back on the toolchain it
+        // was configured with.
+        const std::filesystem::path executable =
+            llvm::sys::fs::getMainExecutable(argv[0], reinterpret_cast<void*>(&Main));
+        (void)UseShippedClangHeaders(executable);
+        if (!HasCompileOnlyAction(parsed.options.compiler_args))
+        {
+            const std::vector<std::string> link = ShippedLinkArguments(executable);
+            parsed.options.compiler_args.insert(parsed.options.compiler_args.end(), link.begin(),
+                                                link.end());
         }
         if (!parsed.ok)
         {

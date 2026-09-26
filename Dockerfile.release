@@ -1,0 +1,157 @@
+# syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: Apache-2.0
+
+# The archive is built on Ubuntu 22.04 so that it runs on its glibc and on every newer
+# distribution: a binary only needs a glibc at least as old as the one it was linked against.
+# Its own toolchain is too old for coretrace-compiler's runtime (C++20 <format> needs GCC 13),
+# so GCC 13 is installed alongside; the libstdc++ it brings is shipped in the archive's lib/.
+FROM ubuntu:22.04 AS base
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LLVM_VERSION=20
+ARG GCC_VERSION=13
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    software-properties-common \
+    wget \
+    build-essential \
+    ninja-build \
+    git \
+    tar \
+    patchelf \
+    python3 \
+    python3-venv \
+    && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    gcc-${GCC_VERSION} \
+    g++-${GCC_VERSION} \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CC=gcc-${GCC_VERSION} CXX=g++-${GCC_VERSION}
+
+# LLVM and Clang from apt.llvm.org, with the CMake packages compilerlib needs.
+RUN wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh \
+    && bash /tmp/llvm.sh ${LLVM_VERSION} \
+    && apt-get install -y --no-install-recommends \
+    llvm-${LLVM_VERSION}-dev \
+    libclang-${LLVM_VERSION}-dev \
+    clang-${LLVM_VERSION} \
+    && rm -rf /var/lib/apt/lists/* /tmp/llvm.sh
+
+# Ubuntu 22.04's CMake is 3.22; the project and coretrace-compiler want newer features.
+ARG CMAKE_VERSION=3.31.6
+RUN python3 -m venv /opt/build-tools \
+    && /opt/build-tools/bin/pip install --no-cache-dir cmake==${CMAKE_VERSION}
+ENV PATH=/opt/build-tools/bin:${PATH}
+
+WORKDIR /repo
+
+FROM base AS builder
+
+ARG LLVM_VERSION=20
+
+COPY . /repo
+
+RUN cmake -S . -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLVM_DIR=/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/llvm \
+        -DClang_DIR=/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/clang \
+    && cmake --build build -j"$(nproc)" \
+    && ctest --test-dir build --output-on-failure
+
+FROM builder AS packager
+
+ARG VERSION=dev
+ARG TARGETARCH
+ARG PROJECT_NAME=runtime-analyzer
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64|arm64) arch_label="${TARGETARCH}" ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    package_name="${PROJECT_NAME}-${VERSION}-linux-${arch_label}"; \
+    staging="/staging/${package_name}"; \
+    \
+    # bin/ and lib/ through CMake: the CLI, the LLVM libraries it links, the runtime archives \
+    # and Clang's headers. \
+    cmake --install build --prefix "${staging}" --strip; \
+    \
+    # The shipped libraries resolve each other through their own directory, and every \
+    # executable resolves them through ../lib (cc, installed by coretrace-compiler's rules, \
+    # carries no rpath of its own). \
+    find "${staging}/lib" -name '*.so*' -type f -exec patchelf --set-rpath '$ORIGIN' {} \; ; \
+    find "${staging}/bin" -type f -exec patchelf --set-rpath '$ORIGIN/../lib' {} \; ; \
+    \
+    # Everything resolves through the rpath alone: no LD_LIBRARY_PATH, no system LLVM. \
+    for exe in "${staging}"/bin/*; do ldd "${exe}" | { ! grep 'not found'; }; done; \
+    \
+    install -m 0644 /repo/README.md /repo/LICENSE /repo/NOTICE "${staging}/"; \
+    \
+    mkdir -p /out; \
+    tar -C /staging -czf "/out/${package_name}.tar.gz" "${package_name}"; \
+    (cd /out && sha256sum "${package_name}.tar.gz" > "${package_name}.tar.gz.sha256"); \
+    rm -rf /staging
+
+# The archive as users receive it, unpacked once and then run on the oldest distributions it
+# targets (Ubuntu 22.04, Debian 12, RHEL 9) and on the newest, each image bare: no clang, no
+# LLVM. Only a C++ build environment is added, as the analyzer links each instrumented program
+# against its C++ runtime, and a C program is analyzed with the shipped Clang headers. Each
+# stage depends on the previous one, so the artifacts are only exported when all of them pass.
+
+FROM base AS unpacked
+
+COPY --from=packager /out/ /out/
+RUN mkdir /opt/runtime-analyzer \
+    && tar -xzf /out/*.tar.gz -C /opt/runtime-analyzer --strip-components=1
+
+FROM ubuntu:22.04 AS verify-ubuntu-22.04
+
+COPY --from=unpacked /out/ /out/
+COPY --from=unpacked /opt/runtime-analyzer/ /opt/runtime-analyzer/
+COPY test/release/ /tests/release/
+COPY test/findings/heap_overflow_write.c /tests/findings/
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends g++; \
+    if command -v clang || ls /usr/lib/llvm-*; then echo "the verification image must not have clang" >&2; exit 1; fi; \
+    /opt/runtime-analyzer/bin/runtime-analyzer --version; \
+    sh /tests/release/check-analysis.sh /opt/runtime-analyzer /tmp/check
+
+FROM debian:12 AS verify-debian-12
+
+COPY --from=verify-ubuntu-22.04 /out/ /out/
+COPY --from=unpacked /opt/runtime-analyzer/ /opt/runtime-analyzer/
+COPY test/release/ /tests/release/
+COPY test/findings/heap_overflow_write.c /tests/findings/
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends g++; \
+    sh /tests/release/check-analysis.sh /opt/runtime-analyzer /tmp/check
+
+FROM rockylinux/rockylinux:9 AS verify-rhel-9
+
+COPY --from=verify-debian-12 /out/ /out/
+COPY --from=unpacked /opt/runtime-analyzer/ /opt/runtime-analyzer/
+COPY test/release/ /tests/release/
+COPY test/findings/heap_overflow_write.c /tests/findings/
+RUN set -eux; \
+    dnf install -y gcc-c++; \
+    sh /tests/release/check-analysis.sh /opt/runtime-analyzer /tmp/check
+
+FROM ubuntu:24.04 AS verify-ubuntu-24.04
+
+COPY --from=verify-rhel-9 /out/ /out/
+COPY --from=unpacked /opt/runtime-analyzer/ /opt/runtime-analyzer/
+COPY test/release/ /tests/release/
+COPY test/findings/heap_overflow_write.c /tests/findings/
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends g++; \
+    sh /tests/release/check-analysis.sh /opt/runtime-analyzer /tmp/check
+
+FROM scratch AS artifacts
+
+COPY --from=verify-ubuntu-24.04 /out/ /
