@@ -13,6 +13,7 @@ runtime-analyzer -o ./app -- --ct-modules=trace,alloc,bounds main.c
 runtime-analyzer --show-events -- main.c
 runtime-analyzer --run-arg input.txt --env CT_LOG_LEVEL=info -- main.c
 runtime-analyzer --test-dir test --output-dir /tmp/runtime-analyzer-tests -- --ct-modules=all
+runtime-analyzer --format sarif -- --ct-modules=alloc,bounds main.c
 ```
 
 Arguments before `--` belong to `runtime-analyzer`. Arguments after `--` are forwarded to
@@ -22,6 +23,46 @@ present after `--`.
 
 The initial collection is intentionally basic: it counts CoreTrace log lines, function entry/exit
 events, allocation events, bounds errors, leak reports, vtable diagnostics, warnings, and errors.
+
+## Findings
+
+Each error the CoreTrace runtime reports while the program runs becomes a finding, available as
+`AnalyzerResult::findings` through the library API and printed after the summary:
+
+```text
+runtime-analyzer: findings=1
+  findings/heap_overflow_write.c:7:15: error: heap-buffer-overflow WRITE of size 4 [heap-buffer-overflow, CWE-122]
+    findings/heap_overflow_write.c:6:19: note: allocated here
+```
+
+| Rule | CWE | Locations |
+|---|---|---|
+| `heap-buffer-overflow` | CWE-122 (write), CWE-125 (read) | faulting access, allocation site |
+| `stack-buffer-overflow` | CWE-121 (write), CWE-125 (read) | faulting access, the object's function |
+| `heap-use-after-free` | CWE-416 | faulting access, allocation site |
+| `double-free` | CWE-415 | second free, allocation site |
+| `memory-leak` | CWE-401, warning | allocation site |
+
+Sites carry the path the source was compiled from, so run the analyzer from the directory the
+static analyzers report paths from. Stack objects are checked by the `bounds` module, which the
+default module set enables.
+
+`--format sarif` prints a SARIF 2.1.0 log instead of the text summary: one result per finding,
+with the faulting access as its location and the allocation site as related location `0`. In
+`--test-dir` mode, the log holds the findings of every program in one run.
+
+## Exit Status
+
+The exit status is the analyzer's verdict. The program's own status is reported as `exit_code=`.
+
+| Status | Meaning |
+|---|---|
+| `0` | the program was built and ran, and reported no finding |
+| `1` | at least one finding was reported |
+| `2` | the program could not be built or run, or the arguments are invalid |
+
+In batch mode the status is the worst of all the tests, and `--strict-test-exit` raises it to at
+least `1` when a program exits non-zero.
 
 ## Batch Test Directory Mode
 
@@ -61,27 +102,3 @@ collection were captured.
 python3 BTP-RUNTIME-ANALYZER_F4.py
 python3 BTP-RUNTIME-ANALYZER_F4.py --build-first
 ```
-
-## F11 Bounds Overflow Proof
-
-`BTP-RUNTIME-ANALYZER_F11.py` proves runtime overflow detection through CoreTrace bounds
-instrumentation. It uses an existing `ct_bounds_overflow` fixture if one is present in `test/`;
-otherwise it generates a small heap-overflow probe in `runtime-analyzer-artifacts/`.
-
-```zsh
-python3 BTP-RUNTIME-ANALYZER_F11.py
-python3 BTP-RUNTIME-ANALYZER_F11.py --no-color
-```
-
-The proof expects a generated instrumented binary, a runtime `heap-buffer-overflow` report, and a
-non-zero `bounds_errors` collection count. Status checks print the tested file name in purple,
-green `OK` for validated conditions, red `NO` for missing conditions, and separate file reports
-with `--------`.
-
-## Code style (clang-format)
-
-- Version cible : `clang-format` 17 (utilisée dans la CI).
-- Formater : `./scripts/format.sh`
-- Vérifier sans modifier : `./scripts/format-check.sh`
-- CMake : `cmake --build build --target format` ou `--target format-check`
-- CI : job GitHub Actions `clang-format` qui échoue si le formatage diverge.

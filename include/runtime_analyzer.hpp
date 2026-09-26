@@ -3,6 +3,7 @@
 #define CORETRACE_RUNTIME_ANALYZER_HPP
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -37,17 +38,42 @@ namespace coretrace::runtime_analyzer
         std::uint64_t errors = 0;
     };
 
+    struct SourceLocation
+    {
+        std::string file;
+        unsigned line = 0;
+        unsigned column = 0; // 0 when the runtime reports none
+    };
+
+    enum class Severity
+    {
+        Warning,
+        Error,
+    };
+
+    // One runtime report, as an editor or a SARIF consumer can use it.
+    struct Finding
+    {
+        std::string rule; // e.g. "heap-buffer-overflow"
+        std::string cwe;  // e.g. "CWE-122"
+        Severity severity = Severity::Error;
+        std::string message;                      // stable text: no addresses
+        std::optional<SourceLocation> location;   // the faulting access
+        std::optional<SourceLocation> allocation; // where the memory was allocated
+    };
+
     struct AnalyzerResult
     {
         bool success = false;
         bool compile_success = false;
         bool executed = false;
-        int exit_code = 1;
+        int exit_code = 1; // the program's own exit status
         std::string output_path;
         std::string diagnostics;
         std::string stdout_text;
         std::string stderr_text;
         std::vector<std::string> coretrace_events;
+        std::vector<Finding> findings;
         CollectionSummary summary;
     };
 
@@ -60,7 +86,9 @@ namespace coretrace::runtime_analyzer
     struct BatchResult
     {
         bool success = false;
-        int exit_code = 1;
+        // The analyzer's verdict: 0 without findings, 1 with findings, 2 when a program could
+        // not be built or run.
+        int exit_code = 2;
         std::vector<TestFileResult> tests;
         CollectionSummary summary;
         std::string diagnostics;
