@@ -3,11 +3,15 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
+#include <csignal>
 #include <cstring>
+#include <optional>
 
 #if !defined(_WIN32)
 #include <fcntl.h>
 #include <sys/select.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -113,12 +117,20 @@ namespace coretrace::runtime_analyzer
 
         if (pid == 0)
         {
+            // Own process group, so that a timeout also stops the programs it forks.
+            (void)setpgid(0, 0);
             close(stdout_pipe[0]);
             close(stderr_pipe[0]);
             (void)dup2(stdout_pipe[1], STDOUT_FILENO);
             (void)dup2(stderr_pipe[1], STDERR_FILENO);
             close(stdout_pipe[1]);
             close(stderr_pipe[1]);
+            const int null_fd = open("/dev/null", O_RDONLY);
+            if (null_fd >= 0)
+            {
+                (void)dup2(null_fd, STDIN_FILENO);
+                close(null_fd);
+            }
 
             if (!spec.working_directory.empty() && chdir(spec.working_directory.c_str()) != 0)
             {
@@ -156,6 +168,13 @@ namespace coretrace::runtime_analyzer
         close(stdout_pipe[1]);
         close(stderr_pipe[1]);
 
+        using Clock = std::chrono::steady_clock;
+        std::optional<Clock::time_point> deadline;
+        if (spec.timeout > std::chrono::milliseconds(0))
+        {
+            deadline = Clock::now() + spec.timeout;
+        }
+
         bool stdout_open = true;
         bool stderr_open = true;
         while (stdout_open || stderr_open)
@@ -174,7 +193,18 @@ namespace coretrace::runtime_analyzer
                 max_fd = std::max(max_fd, stderr_pipe[0]);
             }
 
-            const int selected = select(max_fd + 1, &read_set, nullptr, nullptr, nullptr);
+            timeval remaining{};
+            timeval* wait = nullptr;
+            if (deadline)
+            {
+                const auto left = std::max(*deadline - Clock::now(), Clock::duration::zero());
+                const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(left);
+                remaining.tv_sec = static_cast<time_t>(micros.count() / 1000000);
+                remaining.tv_usec = static_cast<suseconds_t>(micros.count() % 1000000);
+                wait = &remaining;
+            }
+
+            const int selected = select(max_fd + 1, &read_set, nullptr, nullptr, wait);
             if (selected < 0)
             {
                 if (errno == EINTR)
@@ -182,6 +212,21 @@ namespace coretrace::runtime_analyzer
                     continue;
                 }
                 result.error = std::string("select failed: ") + std::strerror(errno);
+                break;
+            }
+            if (selected == 0)
+            {
+                // Deadline: kill the group, keep what was printed, stop reading.
+                (void)kill(-pid, SIGKILL);
+                result.timed_out = true;
+                if (stdout_open)
+                {
+                    AppendFromFd(stdout_pipe[0], result.stdout_text, stdout_open);
+                }
+                if (stderr_open)
+                {
+                    AppendFromFd(stderr_pipe[0], result.stderr_text, stderr_open);
+                }
                 break;
             }
 
@@ -193,6 +238,15 @@ namespace coretrace::runtime_analyzer
             {
                 AppendFromFd(stderr_pipe[0], result.stderr_text, stderr_open);
             }
+        }
+
+        if (stdout_open)
+        {
+            close(stdout_pipe[0]);
+        }
+        if (stderr_open)
+        {
+            close(stderr_pipe[0]);
         }
 
         int status = 0;

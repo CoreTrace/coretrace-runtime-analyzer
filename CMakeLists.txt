@@ -205,6 +205,11 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   target_link_libraries(findings_test PRIVATE ${TOOL_NAME}_lib)
   add_test(NAME findings_unit COMMAND findings_test)
 
+  add_executable(process_test test/unit/process_test.cpp)
+  target_include_directories(process_test PRIVATE src)
+  target_link_libraries(process_test PRIVATE ${TOOL_NAME}_lib)
+  add_test(NAME process_unit COMMAND process_test)
+
   if(BUILD_CLI)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
