@@ -3,12 +3,11 @@
 
 #include "compilerlib/compiler.h"
 #include "findings.hpp"
+#include "process.hpp"
 #include "sarif.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -16,15 +15,6 @@
 #include <sstream>
 #include <string_view>
 #include <utility>
-
-#if defined(_WIN32)
-#include <cstdlib>
-#else
-#include <fcntl.h>
-#include <sys/select.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
 
 namespace coretrace::runtime_analyzer
 {
@@ -56,14 +46,6 @@ namespace coretrace::runtime_analyzer
         {
             bool present = false;
             std::string path;
-        };
-
-        struct ProcessResult
-        {
-            int exit_code = 1;
-            std::string stdout_text;
-            std::string stderr_text;
-            std::string error;
         };
 
         [[nodiscard]] bool IsCompileOnlyFlag(std::string_view arg)
@@ -442,214 +424,6 @@ namespace coretrace::runtime_analyzer
                     HexDigest(StablePathHash(hash_input)));
         }
 
-#if defined(_WIN32)
-        [[nodiscard]] ProcessResult RunProcess(const std::string&, const std::vector<std::string>&,
-                                               const AnalyzerOptions&)
-        {
-            ProcessResult result;
-            result.error = "runtime execution is not implemented on Windows yet";
-            return result;
-        }
-#else
-        [[nodiscard]] bool SetCloseOnExec(int fd)
-        {
-            const int flags = fcntl(fd, F_GETFD);
-            if (flags < 0)
-            {
-                return false;
-            }
-            return fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0;
-        }
-
-        [[nodiscard]] bool SetNonBlocking(int fd)
-        {
-            const int flags = fcntl(fd, F_GETFL);
-            if (flags < 0)
-            {
-                return false;
-            }
-            return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
-        }
-
-        void AppendFromFd(int fd, std::string& output, bool& open)
-        {
-            char buffer[4096];
-            for (;;)
-            {
-                const ssize_t count = read(fd, buffer, sizeof(buffer));
-                if (count > 0)
-                {
-                    output.append(buffer, static_cast<std::size_t>(count));
-                    continue;
-                }
-                if (count == 0)
-                {
-                    close(fd);
-                    open = false;
-                    return;
-                }
-                if (errno == EINTR)
-                {
-                    continue;
-                }
-                if (errno == EAGAIN || errno == EWOULDBLOCK)
-                {
-                    return;
-                }
-                close(fd);
-                open = false;
-                return;
-            }
-        }
-
-        [[nodiscard]] ProcessResult RunProcess(const std::string& executable,
-                                               const std::vector<std::string>& program_args,
-                                               const AnalyzerOptions& options)
-        {
-            ProcessResult result;
-            int stdout_pipe[2] = {-1, -1};
-            int stderr_pipe[2] = {-1, -1};
-            if (pipe(stdout_pipe) != 0)
-            {
-                result.error = std::string("pipe failed: ") + std::strerror(errno);
-                return result;
-            }
-            if (pipe(stderr_pipe) != 0)
-            {
-                result.error = std::string("pipe failed: ") + std::strerror(errno);
-                close(stdout_pipe[0]);
-                close(stdout_pipe[1]);
-                return result;
-            }
-
-            (void)SetCloseOnExec(stdout_pipe[0]);
-            (void)SetCloseOnExec(stderr_pipe[0]);
-            (void)SetNonBlocking(stdout_pipe[0]);
-            (void)SetNonBlocking(stderr_pipe[0]);
-
-            const pid_t pid = fork();
-            if (pid < 0)
-            {
-                result.error = std::string("fork failed: ") + std::strerror(errno);
-                close(stdout_pipe[0]);
-                close(stdout_pipe[1]);
-                close(stderr_pipe[0]);
-                close(stderr_pipe[1]);
-                return result;
-            }
-
-            if (pid == 0)
-            {
-                close(stdout_pipe[0]);
-                close(stderr_pipe[0]);
-                (void)dup2(stdout_pipe[1], STDOUT_FILENO);
-                (void)dup2(stderr_pipe[1], STDERR_FILENO);
-                close(stdout_pipe[1]);
-                close(stderr_pipe[1]);
-
-                if (!options.working_directory.empty() &&
-                    chdir(options.working_directory.c_str()) != 0)
-                {
-                    _exit(126);
-                }
-
-                for (const std::string& assignment : options.environment)
-                {
-                    const std::size_t eq = assignment.find('=');
-                    if (eq != std::string::npos && eq != 0)
-                    {
-                        std::string name = assignment.substr(0, eq);
-                        std::string value = assignment.substr(eq + 1);
-                        setenv(name.c_str(), value.c_str(), 1);
-                    }
-                }
-
-                std::vector<std::string> argv_storage;
-                argv_storage.reserve(program_args.size() + 1);
-                argv_storage.push_back(executable);
-                argv_storage.insert(argv_storage.end(), program_args.begin(), program_args.end());
-
-                std::vector<char*> argv;
-                argv.reserve(argv_storage.size() + 1);
-                for (std::string& arg : argv_storage)
-                {
-                    argv.push_back(arg.data());
-                }
-                argv.push_back(nullptr);
-
-                execv(executable.c_str(), argv.data());
-                _exit(errno == ENOENT ? 127 : 126);
-            }
-
-            close(stdout_pipe[1]);
-            close(stderr_pipe[1]);
-
-            bool stdout_open = true;
-            bool stderr_open = true;
-            while (stdout_open || stderr_open)
-            {
-                fd_set read_set;
-                FD_ZERO(&read_set);
-                int max_fd = -1;
-                if (stdout_open)
-                {
-                    FD_SET(stdout_pipe[0], &read_set);
-                    max_fd = std::max(max_fd, stdout_pipe[0]);
-                }
-                if (stderr_open)
-                {
-                    FD_SET(stderr_pipe[0], &read_set);
-                    max_fd = std::max(max_fd, stderr_pipe[0]);
-                }
-
-                const int selected = select(max_fd + 1, &read_set, nullptr, nullptr, nullptr);
-                if (selected < 0)
-                {
-                    if (errno == EINTR)
-                    {
-                        continue;
-                    }
-                    result.error = std::string("select failed: ") + std::strerror(errno);
-                    break;
-                }
-
-                if (stdout_open && FD_ISSET(stdout_pipe[0], &read_set))
-                {
-                    AppendFromFd(stdout_pipe[0], result.stdout_text, stdout_open);
-                }
-                if (stderr_open && FD_ISSET(stderr_pipe[0], &read_set))
-                {
-                    AppendFromFd(stderr_pipe[0], result.stderr_text, stderr_open);
-                }
-            }
-
-            int status = 0;
-            while (waitpid(pid, &status, 0) < 0)
-            {
-                if (errno != EINTR)
-                {
-                    result.error = std::string("waitpid failed: ") + std::strerror(errno);
-                    return result;
-                }
-            }
-
-            if (WIFEXITED(status))
-            {
-                result.exit_code = WEXITSTATUS(status);
-            }
-            else if (WIFSIGNALED(status))
-            {
-                result.exit_code = 128 + WTERMSIG(status);
-            }
-            else
-            {
-                result.exit_code = 1;
-            }
-
-            return result;
-        }
-#endif
-
         void PrintHelp(std::ostream& out)
         {
             out << "Usage: runtime-analyzer [options] -- <compiler args>\n\n"
@@ -1014,8 +788,9 @@ namespace coretrace::runtime_analyzer
             return result;
         }
 
-        const std::string executable = AbsolutePathForExecution(output_path);
-        ProcessResult process = RunProcess(executable, options.program_args, options);
+        ProcessResult process =
+            RunProcess({AbsolutePathForExecution(output_path), options.program_args,
+                        options.environment, options.working_directory});
         result.stdout_text = std::move(process.stdout_text);
         result.stderr_text = std::move(process.stderr_text);
         result.exit_code = process.exit_code;
