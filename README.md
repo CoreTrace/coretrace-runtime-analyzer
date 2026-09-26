@@ -95,31 +95,23 @@ after runtime failures and timeouts, marks them `[RUNTIME]` and `[TIMEOUT]` in t
 and counts them in the batch summary. Add `--strict-test-exit` if a non-zero test binary exit
 should make the analyzer return a non-zero exit code.
 
-## Python Test Runner
+## Tests
 
-`BTP-RUNTIME-ANALYZER.py` compiles every C/C++ source in `test/`, verifies that each source has a
-generated executable, then runs every binary with a 10 second timeout and prints stdout/stderr.
-Before the directory sweep, it also runs a generated minimal C probe and asserts that
-`runtime-analyzer` builds an instrumented binary, executes it, captures the program output, and
-collects basic CoreTrace entry/exit lines.
+The suite is registered with CTest by the top-level project only, so FetchContent consumers do not
+inherit it. The end-to-end checks need Python 3 at test time.
 
 ```zsh
-python3 BTP-RUNTIME-ANALYZER.py
-python3 BTP-RUNTIME-ANALYZER.py --timeout 10 -- --ct-no-alloc-trace --ct-no-trace --ct-bounds-no-abort
+cmake -S . -B build -DLLVM_DIR=$(brew --prefix llvm@20)/lib/cmake/llvm
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-Non-zero binary exits are reported without failing the script by default, because some runtime tests
-intentionally abort. Use `--strict-exit` to fail on any non-zero binary exit.
-
-## F4 Minimal Runtime Analyzer Proof
-
-`BTP-RUNTIME-ANALYZER_F4.py` proves minimal execution of an instrumented binary and basic runtime
-collection through `coretrace-runtime-analyzer`. It generates a small C probe in
-`runtime-analyzer-artifacts/`, compiles it with `runtime-analyzer`, verifies that the instrumented
-binary exists and is executable, then checks that the program output and CoreTrace entry/exit
-collection were captured.
-
-```zsh
-python3 BTP-RUNTIME-ANALYZER_F4.py
-python3 BTP-RUNTIME-ANALYZER_F4.py --build-first
-```
+| Test | Checks |
+|---|---|
+| `findings_unit`, `process_unit` | the report parser and the process runner (`unittests/`) |
+| `findings` | one fixture per finding kind (`test/findings/`) and the vtable fixtures: rule, CWE, location, exit status, SARIF and text output, batch mode |
+| `timeout` | hung, stdin-reading and forking programs, alone and in a batch |
+| `compile_failure` | a source that fails code generation fails its own analysis only |
+| `hello_runs` | `test/examples/fixtures/hello.c` runs and its entry/exit events are collected |
+| `sweep_compiles` | every source under `test/` compiles (`--test-dir test --no-run`) |
+| `sweep_runs` | every binary runs without a timeout (`--test-dir test --timeout 10 -- --ct-modules=alloc`) |
