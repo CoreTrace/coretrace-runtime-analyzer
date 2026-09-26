@@ -54,13 +54,7 @@ set(CORETRACE_COMPILER_GIT_TAG "41de24ae3f4f4091df63dfd323f7176c6efb9359" CACHE 
 project(${TOOL_NAME} LANGUAGES C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
-include(CheckLLVMVersion OPTIONAL)
-
-if(COMMAND check_llvm_version)
-    check_llvm_version(${LLVM_MIN_REQUIRED_VERSION})
-else()
-    message(WARNING "check_llvm_version() not available, skipping LLVM version check")
-endif()
+include(CheckLLVMVersion)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -69,6 +63,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
+check_llvm_version(${LLVM_MIN_REQUIRED_VERSION})
 
 include(FetchContent)
 
@@ -252,5 +247,14 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     set_tests_properties(sweep_runs PROPERTIES
       PASS_REGULAR_EXPRESSION "runtime-analyzer: batch"
       FAIL_REGULAR_EXPRESSION "\\[TIMEOUT\\];\\[COMPILE\\]")
+
+    # Configuration fails, rather than warns, against an LLVM below the floor.
+    add_test(NAME llvm_floor
+      COMMAND ${CMAKE_COMMAND} -S "${CMAKE_CURRENT_SOURCE_DIR}"
+              -B "${CMAKE_CURRENT_BINARY_DIR}/llvm-floor"
+              -DLLVM_DIR=${LLVM_DIR} -DClang_DIR=${Clang_DIR} -DLLVM_MIN_REQUIRED_VERSION=99)
+    set_tests_properties(llvm_floor PROPERTIES
+      PASS_REGULAR_EXPRESSION "needs LLVM 99 or later")
+
   endif()
 endif()
