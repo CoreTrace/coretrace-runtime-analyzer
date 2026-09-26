@@ -985,10 +985,18 @@ namespace coretrace::runtime_analyzer
             return 0;
         }
 
-        // An installed CLI carries Clang's headers next to itself; a build-tree one does not,
-        // and coretrace-compiler then falls back on the clang it was configured with.
-        (void)UseShippedClangHeaders(
-            llvm::sys::fs::getMainExecutable(argv[0], reinterpret_cast<void*>(&Main)));
+        // An installed CLI carries Clang's headers and the C++ runtime next to itself; a
+        // build-tree one does not, and coretrace-compiler then falls back on the toolchain it
+        // was configured with.
+        const std::filesystem::path executable =
+            llvm::sys::fs::getMainExecutable(argv[0], reinterpret_cast<void*>(&Main));
+        (void)UseShippedClangHeaders(executable);
+        if (!HasCompileOnlyAction(parsed.options.compiler_args))
+        {
+            const std::vector<std::string> link = ShippedLinkArguments(executable);
+            parsed.options.compiler_args.insert(parsed.options.compiler_args.end(), link.begin(),
+                                                link.end());
+        }
         if (!parsed.ok)
         {
             std::cerr << "runtime-analyzer: " << parsed.error << '\n';

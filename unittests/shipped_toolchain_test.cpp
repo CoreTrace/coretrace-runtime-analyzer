@@ -8,9 +8,11 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace
 {
+    using coretrace::runtime_analyzer::ShippedLinkArguments;
     using coretrace::runtime_analyzer::UseShippedClangHeaders;
 
     int failures = 0;
@@ -62,6 +64,22 @@ namespace
         unsetenv("CT_CLANG");
     }
 
+    void LinksAgainstTheShippedCxxRuntime()
+    {
+        const std::filesystem::path executable = Layout("cxx", false);
+        const std::filesystem::path lib =
+            (executable.parent_path() / ".." / "lib").lexically_normal();
+        std::filesystem::create_directories(lib);
+        std::ofstream(lib / "libstdc++.so") << "\n";
+        const std::vector<std::string> arguments = ShippedLinkArguments(executable);
+        Expect(arguments ==
+                   std::vector<std::string>{"-L" + lib.string(), "-Wl,-rpath," + lib.string()},
+               "shipped libstdc++: -L and -rpath on the shipped lib directory");
+        Expect(ShippedLinkArguments(Layout("nocxx", false)).empty(),
+               "no shipped libstdc++: no link argument");
+        Expect(ShippedLinkArguments({}).empty(), "unknown executable: no link argument");
+    }
+
     void DoesNothingWithoutHeaders()
     {
         unsetenv("CT_CLANG");
@@ -76,6 +94,7 @@ int main()
 {
     PointsAtItselfWhenHeadersAreShipped();
     LeavesTheUsersClangAlone();
+    LinksAgainstTheShippedCxxRuntime();
     DoesNothingWithoutHeaders();
     if (failures != 0)
     {

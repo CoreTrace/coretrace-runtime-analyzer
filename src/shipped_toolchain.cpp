@@ -24,4 +24,20 @@ namespace coretrace::runtime_analyzer
         }
         return false;
     }
+
+    std::vector<std::string> ShippedLinkArguments(const std::filesystem::path& executable)
+    {
+        if (executable.empty())
+        {
+            return {};
+        }
+        std::error_code error;
+        const std::filesystem::path lib =
+            (executable.parent_path() / ".." / "lib").lexically_normal();
+        if (!std::filesystem::is_regular_file(lib / "libstdc++.so", error))
+        {
+            return {};
+        }
+        return {"-L" + lib.string(), "-Wl,-rpath," + lib.string()};
+    }
 } // namespace coretrace::runtime_analyzer

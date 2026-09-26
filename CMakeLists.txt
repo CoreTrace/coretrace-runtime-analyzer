@@ -218,6 +218,9 @@ if(BUILD_CLI)
       DIRECTORIES ${LLVM_LIBRARY_DIRS}
       LIBRARY DESTINATION lib
     )
+    # Instrumented programs are linked against the shipped libstdc++ (-lstdc++ needs the
+    # unversioned name), as the runtime archives may use symbols the target's lacks.
+    install(CODE "file(CREATE_LINK libstdc++.so.6 \"\${CMAKE_INSTALL_PREFIX}/lib/libstdc++.so\" SYMBOLIC)")
   else()
     install(TARGETS ${TOOL_NAME} RUNTIME DESTINATION bin)
   endif()
