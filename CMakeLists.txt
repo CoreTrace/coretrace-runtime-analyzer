@@ -13,6 +13,7 @@ set(TOOL_NAMESPACE "coretrace" CACHE STRING "CMake namespace for ALIAS targets")
 
 # Library sources (add/remove files here)
 set(TOOL_SOURCES
+    src/findings.cpp
     src/runtime_analyzer.cpp
 )
 
@@ -188,4 +189,17 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/format-check.sh"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Verify clang-format compliance")
+endif()
+
+# =======
+#  TESTS
+# =======
+# Only the top-level project runs them: FetchContent consumers do not inherit the suite.
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+  enable_testing()
+
+  add_executable(findings_test test/unit/findings_test.cpp)
+  target_include_directories(findings_test PRIVATE src)
+  target_link_libraries(findings_test PRIVATE ${TOOL_NAME}_lib)
+  add_test(NAME findings_unit COMMAND findings_test)
 endif()
