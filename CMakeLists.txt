@@ -123,6 +123,9 @@ function(coretrace_add_tool)
         ${CTOOL_SOURCES}
     )
 
+    # The public header uses C++20; a consumer's own targets inherit the requirement.
+    target_compile_features(${_lib_target} PUBLIC cxx_std_20)
+
     # Public headers live in include/
     target_include_directories(${_lib_target}
         PUBLIC
