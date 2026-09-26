@@ -42,6 +42,16 @@ runtime-analyzer: findings=1
 | `heap-use-after-free` | CWE-416 | faulting access, allocation site |
 | `double-free` | CWE-415 | second free, allocation site |
 | `memory-leak` | CWE-401, warning | allocation site |
+| `vtable-null-this` | CWE-476 | virtual call site |
+| `vtable-use-after-free` | CWE-416 | virtual call site |
+| `vtable-corrupted` | CWE-843 | virtual call site |
+| `vcall-invalid-target` | CWE-843 | virtual call site |
+| `vtable-type-mismatch` | CWE-843, warning | virtual call site |
+
+The vtable rules come from the `vtable` module's diagnostics (`--ct-modules=alloc,vtable
+--ct-vtable-diag`): each box the runtime logs at `WARN` level is one finding, its message listing
+the box's warnings, and its rule the most specific warning. Boxes logged at `INFO` level are
+tracing and produce no finding.
 
 Sites carry the path the source was compiled from, so run the analyzer from the directory the
 static analyzers report paths from. Stack objects are checked by the `bounds` module, which the
