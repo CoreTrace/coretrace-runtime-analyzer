@@ -1,30 +1,58 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Release
 
-# On a v* tag: check that the tag matches the project() version, build and test as the Build
-# workflow does, then attach the installed tree as runtime-analyzer-linux-x86_64.tar.gz, with
-# its SHA256SUMS, to the GitHub Release of the tag.
+# Builds the self-contained Linux archives with Dockerfile.release (Ubuntu 22.04 base, LLVM
+# libraries and Clang headers shipped, verified on bare images) for amd64 and arm64, on every
+# change to the release files and on demand. On a v* tag, the tag must match the project()
+# version, and the archives with their checksums are attached to the GitHub Release.
 
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths:
+      - Dockerfile.release
+      - .dockerignore
+      - .github/workflows/release.yml
+      - test/release/**
+      - cmake/**
+      - CMakeLists.txt
+      - src/**
+      - include/**
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 env:
-  LLVM_VERSION: 20
-  ARCHIVE: runtime-analyzer-linux-x86_64.tar.gz
+  PROJECT_NAME: runtime-analyzer
 
 jobs:
-  release:
-    name: Build, test and attach the Linux x86_64 tarball
-    runs-on: ubuntu-24.04
+  build-archives:
+    name: Build the Linux archive (${{ matrix.arch }})
+    # Each architecture builds on a native runner: emulating arm64 on an x86 host takes far
+    # longer for an LLVM-linked tool.
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Check that the tag matches the project version
+        if: github.ref_type == 'tag'
         run: |
           version="$(sed -n 's/^project(.* VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)"
           test -n "$version" || { echo "no project() VERSION in CMakeLists.txt"; exit 1; }
@@ -33,39 +61,72 @@ jobs:
             exit 1
           fi
 
-      - name: Install LLVM ${{ env.LLVM_VERSION }}
+      - name: Resolve the artifact version
+        id: version
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build
-          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-          sudo bash /tmp/llvm.sh "$LLVM_VERSION"
-          sudo apt-get install -y "llvm-$LLVM_VERSION-dev" "libclang-$LLVM_VERSION-dev" "clang-$LLVM_VERSION"
-          echo "LLVM_DIR=/usr/lib/llvm-$LLVM_VERSION/lib/cmake/llvm" >> "$GITHUB_ENV"
-          echo "Clang_DIR=/usr/lib/llvm-$LLVM_VERSION/lib/cmake/clang" >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "value=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=sha-$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Configure
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build, verify and export the archive
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DLLVM_DIR="$LLVM_DIR" -DClang_DIR="$Clang_DIR"
+          set -euo pipefail
+          out_dir="dist/${{ matrix.arch }}"
+          mkdir -p "$out_dir"
+          docker buildx build \
+            --platform "${{ matrix.platform }}" \
+            --file Dockerfile.release \
+            --target artifacts \
+            --build-arg VERSION="${{ steps.version.outputs.value }}" \
+            --build-arg PROJECT_NAME="$PROJECT_NAME" \
+            --output "type=local,dest=$out_dir" \
+            .
+          ls -la "$out_dir"
 
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
-
-      - name: Package
+      - name: Validate the artifact files
         run: |
-          cmake --install build --prefix dist/runtime-analyzer
-          tar -C dist -czf "$ARCHIVE" runtime-analyzer
-          sha256sum "$ARCHIVE" > SHA256SUMS
-          cat SHA256SUMS
+          set -euo pipefail
+          dir="dist/${{ matrix.arch }}"
+          archive="$dir/$PROJECT_NAME-${{ steps.version.outputs.value }}-linux-${{ matrix.arch }}.tar.gz"
+          test -f "$archive" || { echo "missing archive: $archive"; exit 1; }
+          test -f "$archive.sha256" || { echo "missing checksum: $archive.sha256"; exit 1; }
+          (cd "$dir" && sha256sum -c "$(basename "$archive.sha256")")
 
-      - name: Attach to the GitHub Release
+      - name: Upload the workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PROJECT_NAME }}-${{ steps.version.outputs.value }}-linux-${{ matrix.arch }}
+          path: |
+            dist/${{ matrix.arch }}/*.tar.gz
+            dist/${{ matrix.arch }}/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Attach the archives to the GitHub Release
+    runs-on: ubuntu-24.04
+    needs: build-archives
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download the archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ env.PROJECT_NAME }}-*-linux-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ env.ARCHIVE }}
-            SHA256SUMS
+            dist/*.tar.gz
+            dist/*.sha256
           fail_on_unmatched_files: true
           generate_release_notes: true
