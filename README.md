@@ -186,11 +186,13 @@ is killed, the output captured so far is still parsed for findings, the summary 
 
 The CLI is a thin `main()` over `coretrace::runtime_analyzer::Run()`, declared in
 `include/runtime_analyzer.hpp`. A CMake project can fetch this repository and link
-`coretrace::runtime-analyzer_lib`; `AnalyzerResult::findings` then holds the findings of a run,
+`coretrace::runtime-analyzer_lib`, which requires C++20 of its consumers;
+`AnalyzerResult::findings` then holds the findings of a run,
 `AnalyzerOptions::timeout` bounds it, and `AnalyzerResult::timed_out` reports a killed run. The
 version is `coretrace::runtime_analyzer::kVersion`, from the generated
 `runtime_analyzer_version.hpp`. The CTest suite is registered by the top-level project only, so
-consumers do not inherit it.
+consumers do not inherit it. `unittests/consumer/` is a complete consumer, built and run by the
+`consumer` test.
 
 ## Batch Test Directory Mode
 
@@ -217,6 +219,8 @@ ctest --test-dir build --output-on-failure
 | Test | Checks |
 |---|---|
 | `findings_unit`, `process_unit` | the report parser and the process runner (`unittests/`) |
+| `api_unit` | the library API: `Run` and `RunBatch` on real programs, a heap overflow, a compile-only run, a hang against the timeout, a batch, the refused and empty cases |
+| `consumer` | a project fetching this repository the way ctrace does (`unittests/consumer/`) configures, builds, links `coretrace::runtime-analyzer_lib` and analyzes a program |
 | `findings` | one fixture per finding kind (`test/findings/`) and the vtable fixtures: rule, CWE, location, exit status, SARIF and text output, batch mode |
 | `timeout` | hung, stdin-reading and forking programs, alone and in a batch |
 | `compile_failure` | a source that fails code generation fails its own analysis only |
