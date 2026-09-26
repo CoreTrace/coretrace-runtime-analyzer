@@ -41,11 +41,11 @@ set(LLVM_COMPONENTS
 # CoreTrace compiler dependency
 option(CORETRACE_FETCH_COMPILERLIB "Fetch coretrace-compiler via FetchContent if needed" ON)
 set(CORETRACE_COMPILER_GIT_REPOSITORY "https://github.com/CoreTrace/coretrace-compiler.git" CACHE STRING "coretrace-compiler repository")
-# Pinned to the first main commit after v0.8.0 that returns code-generation errors from
-# compile() instead of ending the host process (CoreTrace/coretrace-compiler#91), places the
-# stack push after its allocas (#90) and keeps source paths in runtime sites (#92). Move it to
-# the next release tag once one contains these fixes.
-set(CORETRACE_COMPILER_GIT_TAG "41de24ae3f4f4091df63dfd323f7176c6efb9359" CACHE STRING "coretrace-compiler git tag")
+# Pinned to a release tag so that builds are reproducible. v0.9.0 is the first release that
+# returns code-generation errors from compile() instead of ending the host process
+# (CoreTrace/coretrace-compiler#91), places the stack push after its allocas (#90) and keeps
+# source paths in runtime sites (#92).
+set(CORETRACE_COMPILER_GIT_TAG "v0.9.0" CACHE STRING "coretrace-compiler git tag")
 
 # ------------------------------
 # END PROJECT CONFIG

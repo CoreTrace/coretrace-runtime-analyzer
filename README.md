@@ -59,7 +59,7 @@ archives relative to its own location, so the tree can be moved. At run time it 
 
 Needs CMake 3.16 or later, a C++20 compiler, LLVM and Clang 19 or later with their CMake
 packages, and Python 3 for the tests. coretrace-compiler is fetched at configure time, at the
-commit pinned in `CMakeLists.txt`.
+release tag pinned in `CMakeLists.txt`.
 
 ```zsh
 # macOS: brew install llvm@20. Debian/Ubuntu: /usr/lib/llvm-20/lib/cmake/{llvm,clang}.
