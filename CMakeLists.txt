@@ -17,6 +17,7 @@ set(TOOL_SOURCES
     src/process.cpp
     src/runtime_analyzer.cpp
     src/sarif.cpp
+    src/shipped_toolchain.cpp
 )
 
 # CLI
@@ -195,6 +196,8 @@ install(TARGETS ${TOOL_NAME}_lib
 )
 if(BUILD_CLI)
   install(TARGETS ${TOOL_NAME} RUNTIME DESTINATION bin)
+  # Clang's headers next to the CLI, so that no clang is needed where it runs.
+  include(ClangHeaders)
 endif()
 install(DIRECTORY include/ DESTINATION include)
 install(FILES "${TOOL_GENERATED_INCLUDE_DIR}/runtime_analyzer_version.hpp" DESTINATION include)
@@ -230,6 +233,11 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   target_include_directories(process_test PRIVATE src)
   target_link_libraries(process_test PRIVATE ${TOOL_NAME}_lib)
   add_test(NAME process_unit COMMAND process_test)
+
+  add_executable(shipped_toolchain_test unittests/shipped_toolchain_test.cpp)
+  target_include_directories(shipped_toolchain_test PRIVATE src)
+  target_link_libraries(shipped_toolchain_test PRIVATE ${TOOL_NAME}_lib)
+  add_test(NAME shipped_toolchain_unit COMMAND shipped_toolchain_test)
 
   if(BUILD_CLI)
     find_package(Python3 COMPONENTS Interpreter)
@@ -286,7 +294,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     # runs an instrumented program with the runtime archives installed next to it.
     set(_prefix "${CMAKE_CURRENT_BINARY_DIR}/prefix")
     add_test(NAME install_layout
-      COMMAND sh -c "rm -rf \"${_prefix}\" && ${CMAKE_COMMAND} --install \"${CMAKE_CURRENT_BINARY_DIR}\" --prefix \"${_prefix}\" > /dev/null && test -f \"${_prefix}/lib/lib${TOOL_NAME}_lib.a\" && test -f \"${_prefix}/include/runtime_analyzer.hpp\" && test -f \"${_prefix}/include/runtime_analyzer_version.hpp\" && \"${_prefix}/bin/${TOOL_NAME}\" --version && \"${_prefix}/bin/${TOOL_NAME}\" -o \"${_prefix}/hello\" -- test/examples/fixtures/hello.c"
+      COMMAND sh -c "rm -rf \"${_prefix}\" && ${CMAKE_COMMAND} --install \"${CMAKE_CURRENT_BINARY_DIR}\" --prefix \"${_prefix}\" > /dev/null && test -f \"${_prefix}/lib/lib${TOOL_NAME}_lib.a\" && test -f \"${_prefix}/include/runtime_analyzer.hpp\" && test -f \"${_prefix}/include/runtime_analyzer_version.hpp\" && test -f \"${_prefix}\"/lib/clang/*/include/stddef.h && \"${_prefix}/bin/${TOOL_NAME}\" --version && \"${_prefix}/bin/${TOOL_NAME}\" -o \"${_prefix}/hello\" -- test/examples/fixtures/hello.c"
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
   endif()
 endif()
