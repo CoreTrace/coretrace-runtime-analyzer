@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Generated from cmake/runtime_analyzer_version.hpp.in by CMake: do not edit.
+#ifndef CORETRACE_RUNTIME_ANALYZER_VERSION_HPP
+#define CORETRACE_RUNTIME_ANALYZER_VERSION_HPP
+
+#define CORETRACE_RUNTIME_ANALYZER_VERSION "@PROJECT_VERSION@"
+
+namespace coretrace::runtime_analyzer
+{
+    inline constexpr const char* kVersion = CORETRACE_RUNTIME_ANALYZER_VERSION;
+} // namespace coretrace::runtime_analyzer
+
+#endif // CORETRACE_RUNTIME_ANALYZER_VERSION_HPP

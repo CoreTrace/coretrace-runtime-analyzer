@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Release
+
+# On a v* tag: check that the tag matches the project() version, build and test as the Build
+# workflow does, then attach the installed tree as runtime-analyzer-linux-x86_64.tar.gz, with
+# its SHA256SUMS, to the GitHub Release of the tag.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  LLVM_VERSION: 20
+  ARCHIVE: runtime-analyzer-linux-x86_64.tar.gz
+
+jobs:
+  release:
+    name: Build, test and attach the Linux x86_64 tarball
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the tag matches the project version
+        run: |
+          version="$(sed -n 's/^project(.* VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)"
+          test -n "$version" || { echo "no project() VERSION in CMakeLists.txt"; exit 1; }
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the project version $version"
+            exit 1
+          fi
+
+      - name: Install LLVM ${{ env.LLVM_VERSION }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash /tmp/llvm.sh "$LLVM_VERSION"
+          sudo apt-get install -y "llvm-$LLVM_VERSION-dev" "libclang-$LLVM_VERSION-dev" "clang-$LLVM_VERSION"
+          echo "LLVM_DIR=/usr/lib/llvm-$LLVM_VERSION/lib/cmake/llvm" >> "$GITHUB_ENV"
+          echo "Clang_DIR=/usr/lib/llvm-$LLVM_VERSION/lib/cmake/clang" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR="$LLVM_DIR" -DClang_DIR="$Clang_DIR"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package
+        run: |
+          cmake --install build --prefix dist/runtime-analyzer
+          tar -C dist -czf "$ARCHIVE" runtime-analyzer
+          sha256sum "$ARCHIVE" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attach to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.ARCHIVE }}
+            SHA256SUMS
+          fail_on_unmatched_files: true
+          generate_release_notes: true

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "runtime_analyzer.hpp"
+#include "runtime_analyzer_version.hpp"
 
 #include "compilerlib/compiler.h"
 #include "findings.hpp"
@@ -40,6 +41,7 @@ namespace coretrace::runtime_analyzer
         {
             bool ok = true;
             bool help = false;
+            bool version = false;
             AnalyzerOptions options;
             OutputFormat format = OutputFormat::Text;
             std::string error;
@@ -456,7 +458,8 @@ namespace coretrace::runtime_analyzer
                 << "  --show-events             Print collected CoreTrace event lines\n"
                 << "  --format <text|sarif>     Print a text summary (default) or a SARIF log "
                    "of the findings\n"
-                << "  -h, --help                Show this help\n\n"
+                << "  -h, --help                Show this help\n"
+                << "  --version                 Print the version and exit\n\n"
                 << "Exit status: 0 without findings, 1 with findings, 2 when the program could "
                    "not be built or run.\n\n"
                 << "Example:\n"
@@ -485,6 +488,11 @@ namespace coretrace::runtime_analyzer
                 if (arg == "-h" || arg == "--help")
                 {
                     result.help = true;
+                    return result;
+                }
+                if (arg == "--version")
+                {
+                    result.version = true;
                     return result;
                 }
                 if (arg == "-o" || arg == "--output")
@@ -966,6 +974,11 @@ namespace coretrace::runtime_analyzer
         if (parsed.help)
         {
             PrintHelp(std::cout);
+            return 0;
+        }
+        if (parsed.version)
+        {
+            std::cout << "runtime-analyzer " << kVersion << '\n';
             return 0;
         }
         if (!parsed.ok)
