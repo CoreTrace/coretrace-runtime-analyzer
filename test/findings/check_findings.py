@@ -16,6 +16,7 @@ HERE = Path(__file__).resolve().parent
 
 # fixture: (rule, CWE, SARIF level, faulting access line, allocation line). A stack object's
 # allocation line is its function's; a leak has no faulting access.
+MEMORY_ARGS = ["--ct-modules=alloc,bounds"]
 EXPECTED = {
     "heap_overflow_write.c": ("heap-buffer-overflow", "CWE-122", "error", 7, 6),
     "heap_overflow_read.c": ("heap-buffer-overflow", "CWE-125", "error", 7, 6),
@@ -25,7 +26,16 @@ EXPECTED = {
     "memory_leak.c": ("memory-leak", "CWE-401", "warning", None, 6),
 }
 
-COMPILER_ARGS = ["--ct-modules=alloc,bounds"]
+# The vtable module's diagnostics, over the fixtures at the root of test/. The boxes carry no
+# allocation site.
+VTABLE_ARGS = ["--ct-modules=alloc,vtable", "--ct-vtable-diag"]
+VTABLE_EXPECTED = {
+    "ct_vtable_diag_null.cpp": ("vtable-null-this", "CWE-476", "error", 7),
+    "ct_vtable_diag_freed.cpp": ("vtable-use-after-free", "CWE-416", "error", 22),
+    "ct_vtable_diag_stack_target.cpp": ("vcall-invalid-target", "CWE-843", "error", 25),
+    "ct_vtable_diag_mismatch.cpp": ("vtable-type-mismatch", "CWE-843", "warning", 24),
+    "ct_vtable_diag_fake.cpp": ("vtable-corrupted", "CWE-843", "error", 22),
+}
 
 failures = 0
 
@@ -37,12 +47,14 @@ def expect(condition: bool, message: str) -> None:
         failures += 1
 
 
-def analyze(analyzer: str, work: Path, fixture: str, *options: str) -> subprocess.CompletedProcess:
+def analyze(analyzer: str, work: Path, fixture: str, *options: str,
+            compiler_args: list[str] = MEMORY_ARGS, source: str | None = None
+            ) -> subprocess.CompletedProcess:
     # Run from test/ with a relative source: the finding must carry the path the source was
     # compiled from, as the static analyzers report it.
     return subprocess.run(
-        [analyzer, "-o", str(work / Path(fixture).stem), *options, "--", *COMPILER_ARGS,
-         f"findings/{fixture}"],
+        [analyzer, "-o", str(work / Path(fixture).stem), *options, "--", *compiler_args,
+         source or f"findings/{fixture}"],
         cwd=HERE.parent,
         capture_output=True,
         text=True,
@@ -101,6 +113,28 @@ def main() -> int:
         expect(related.get("id") == 0 and related.get("message", {}).get("text") == "allocated here",
                f"{fixture}: allocation site is related location 0, 'allocated here'")
 
+    for fixture, (rule, cwe, level, line) in VTABLE_EXPECTED.items():
+        completed = analyze(analyzer, work, fixture, "--format=sarif",
+                            compiler_args=VTABLE_ARGS, source=fixture)
+        expect(completed.returncode == 1, f"{fixture}: exit 1 when findings are reported")
+        results = sarif_results(completed, fixture) or []
+        expect(len(results) == 1, f"{fixture}: exactly one finding (got {len(results)})")
+        if len(results) != 1:
+            continue
+        result = results[0]
+        expect(result.get("ruleId") == rule, f"{fixture}: rule {rule}")
+        expect(result.get("properties", {}).get("cwe") == cwe, f"{fixture}: {cwe}")
+        expect(result.get("level") == level, f"{fixture}: level {level}")
+        uri, got_line, column = region(result["locations"][0])
+        expect(uri == fixture and got_line == line and column > 0,
+               f"{fixture}: site at line {line} (got {uri}:{got_line}:{column})")
+        expect("relatedLocations" not in result, f"{fixture}: no allocation site")
+
+    completed = analyze(analyzer, work, "ct_vtable_basic.cpp", "--format=sarif",
+                        compiler_args=VTABLE_ARGS, source="ct_vtable_basic.cpp")
+    expect(completed.returncode == 0 and sarif_results(completed, "ct_vtable_basic.cpp") == [],
+           "ct_vtable_basic.cpp: tracing boxes are not findings")
+
     # The program's exit status is reported, but only runtime errors decide the verdict.
     completed = analyze(analyzer, work, "no_findings.c", "--format=sarif")
     expect(completed.returncode == 0, "no_findings.c: exit 0 without findings")
@@ -127,7 +161,7 @@ def main() -> int:
     # --test-dir runs every fixture and reports all their findings in one log.
     completed = subprocess.run(
         [analyzer, "--test-dir", "findings", "--output-dir", str(work / "batch"),
-         "--format=sarif", "--", *COMPILER_ARGS],
+         "--format=sarif", "--", *MEMORY_ARGS],
         cwd=HERE.parent, capture_output=True, text=True, timeout=300,
     )
     expect(completed.returncode == 1, "batch: exit 1 when any program reports findings")
@@ -137,7 +171,7 @@ def main() -> int:
            "batch: one log with the findings of every program")
     completed = subprocess.run(
         [analyzer, "--test-dir", "findings", "--output-dir", str(work / "batch"),
-         "--", *COMPILER_ARGS],
+         "--", *MEMORY_ARGS],
         cwd=HERE.parent, capture_output=True, text=True, timeout=300,
     )
     expect(completed.returncode == 1 and "runtime-analyzer: [PASS] findings/no_findings.c"
