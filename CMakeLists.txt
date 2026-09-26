@@ -204,12 +204,12 @@ endif()
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   enable_testing()
 
-  add_executable(findings_test test/unit/findings_test.cpp)
+  add_executable(findings_test unittests/findings_test.cpp)
   target_include_directories(findings_test PRIVATE src)
   target_link_libraries(findings_test PRIVATE ${TOOL_NAME}_lib)
   add_test(NAME findings_unit COMMAND findings_test)
 
-  add_executable(process_test test/unit/process_test.cpp)
+  add_executable(process_test unittests/process_test.cpp)
   target_include_directories(process_test PRIVATE src)
   target_link_libraries(process_test PRIVATE ${TOOL_NAME}_lib)
   add_test(NAME process_unit COMMAND process_test)
@@ -228,5 +228,29 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
                 "${CMAKE_CURRENT_SOURCE_DIR}/test/compile_failure/check_compile_failure.py"
                 $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/compile_failure")
     endif()
+
+    # A program runs and its entry/exit events are collected. A shell checks the exit status
+    # and the summary together: PASS_REGULAR_EXPRESSION alone would ignore the status.
+    set(_hello_out "${CMAKE_CURRENT_BINARY_DIR}/hello.out")
+    add_test(NAME hello_runs
+      COMMAND sh -c "\"$<TARGET_FILE:${TOOL_NAME}>\" -o \"${CMAKE_CURRENT_BINARY_DIR}/hello\" -- test/examples/fixtures/hello.c > \"${_hello_out}\" && grep -q 'entry_events=[1-9]' \"${_hello_out}\" && grep -q 'exit_events=[1-9]' \"${_hello_out}\""
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # Every source under test/ compiles: the sweep exits 0 only when no test fails to build.
+    add_test(NAME sweep_compiles
+      COMMAND $<TARGET_FILE:${TOOL_NAME}> --test-dir test --no-run
+              --output-dir "${CMAKE_CURRENT_BINARY_DIR}/sweep"
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    # Every binary runs to completion within the timeout. Several fixtures report findings on
+    # purpose, so the exit status is 1: the pass expression makes CTest ignore it, and any
+    # [TIMEOUT] or [COMPILE] record fails the test.
+    add_test(NAME sweep_runs
+      COMMAND $<TARGET_FILE:${TOOL_NAME}> --test-dir test --timeout 10
+              --output-dir "${CMAKE_CURRENT_BINARY_DIR}/sweep-run" -- --ct-modules=alloc
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(sweep_runs PROPERTIES
+      PASS_REGULAR_EXPRESSION "runtime-analyzer: batch"
+      FAIL_REGULAR_EXPRESSION "\\[TIMEOUT\\];\\[COMPILE\\]")
   endif()
 endif()
