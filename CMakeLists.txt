@@ -14,6 +14,7 @@ set(TOOL_NAMESPACE "coretrace" CACHE STRING "CMake namespace for ALIAS targets")
 # Library sources (add/remove files here)
 set(TOOL_SOURCES
     src/findings.cpp
+    src/process.cpp
     src/runtime_analyzer.cpp
     src/sarif.cpp
 )
@@ -204,12 +205,20 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   target_link_libraries(findings_test PRIVATE ${TOOL_NAME}_lib)
   add_test(NAME findings_unit COMMAND findings_test)
 
+  add_executable(process_test test/unit/process_test.cpp)
+  target_include_directories(process_test PRIVATE src)
+  target_link_libraries(process_test PRIVATE ${TOOL_NAME}_lib)
+  add_test(NAME process_unit COMMAND process_test)
+
   if(BUILD_CLI)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
       add_test(NAME findings
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/findings/check_findings.py"
                 $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/findings")
+      add_test(NAME timeout
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/timeout/check_timeout.py"
+                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/timeout")
     endif()
   endif()
 endif()

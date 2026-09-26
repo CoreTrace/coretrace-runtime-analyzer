@@ -14,6 +14,7 @@ runtime-analyzer --show-events -- main.c
 runtime-analyzer --run-arg input.txt --env CT_LOG_LEVEL=info -- main.c
 runtime-analyzer --test-dir test --output-dir /tmp/runtime-analyzer-tests -- --ct-modules=all
 runtime-analyzer --format sarif -- --ct-modules=alloc,bounds main.c
+runtime-analyzer --timeout 10 -- main.c
 ```
 
 Arguments before `--` belong to `runtime-analyzer`. Arguments after `--` are forwarded to
@@ -61,6 +62,15 @@ default module set enables.
 with the faulting access as its location and the allocation site as related location `0`. In
 `--test-dir` mode, the log holds the findings of every program in one run.
 
+## Timeout
+
+Each run is bounded by `--timeout <seconds>` (60 by default, `0` disables the limit). The program
+starts in its own process group with its stdin on `/dev/null`, so a program waiting for input ends
+at EOF. When the deadline passes, the whole group is killed, the output captured so far is still
+parsed for findings, the summary reports `timed_out=1`, and the diagnostics say
+`program timed out after N s`. Library callers set `AnalyzerOptions::timeout` and read
+`AnalyzerResult::timed_out`.
+
 ## Exit Status
 
 The exit status is the analyzer's verdict. The program's own status is reported as `exit_code=`.
@@ -69,7 +79,7 @@ The exit status is the analyzer's verdict. The program's own status is reported 
 |---|---|
 | `0` | the program was built and ran, and reported no finding |
 | `1` | at least one finding was reported |
-| `2` | the program could not be built or run, or the arguments are invalid |
+| `2` | the program could not be built or run, timed out without findings, or the arguments are invalid |
 
 In batch mode the status is the worst of all the tests, and `--strict-test-exit` raises it to at
 least `1` when a program exits non-zero.
@@ -81,8 +91,9 @@ Each source is compiled and executed as a separate instrumented binary, which av
 collisions between test files that each define `main`.
 
 Arguments after `--` are shared compiler/CoreTrace flags for every test file. Batch mode keeps going
-after runtime failures and reports them at the end. Add `--strict-test-exit` if a non-zero test
-binary exit should make the analyzer return a non-zero exit code.
+after runtime failures and timeouts, marks them `[RUNTIME]` and `[TIMEOUT]` in the per-test lines,
+and counts them in the batch summary. Add `--strict-test-exit` if a non-zero test binary exit
+should make the analyzer return a non-zero exit code.
 
 ## Python Test Runner
 
