@@ -14,6 +14,8 @@ set(TOOL_NAMESPACE "coretrace" CACHE STRING "CMake namespace for ALIAS targets")
 
 # Library sources (add/remove files here)
 set(TOOL_SOURCES
+    src/cli_args.cpp
+    src/events.cpp
     src/findings.cpp
     src/process.cpp
     src/runtime_analyzer.cpp
