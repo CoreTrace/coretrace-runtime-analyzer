@@ -13,6 +13,7 @@ written into the work directory: they must not live under test/, which the sweep
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -87,11 +88,12 @@ def check_options(analyzer: str, work: Path) -> None:
     completed = program(analyzer, work, "cwd.c", "--show-output", "--cwd", str(elsewhere))
     expect(completed.returncode == 0 and f"{elsewhere.resolve()}\n" in completed.stdout,
            "--cwd: the program runs in that directory")
-    completed = run(analyzer, "-o", "cwd_relative", "--show-output", "--cwd", str(elsewhere),
+    # A relative -o is relative to the analyzer's own directory, not to --cwd.
+    relative = Path(os.path.relpath(work / "cwd_relative", TEST_DIR))
+    completed = run(analyzer, "-o", str(relative), "--show-output", "--cwd", str(elsewhere),
                     "--", *MEMORY_ARGS, str(work / "cwd.c"))
     expect(completed.returncode == 0 and f"{elsewhere.resolve()}\n" in completed.stdout,
            "--cwd: a relative -o still names the binary to run")
-    Path(TEST_DIR / "cwd_relative").unlink(missing_ok=True)
 
     completed = program(analyzer, work, "chatty.c", "--show-output")
     expect(completed.returncode == 0
