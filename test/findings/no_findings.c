@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+// expect: none
+// expect: program-exit=3
 #include <stdlib.h>
 
 // Exits non-zero without any memory error: the program's status is not a finding.

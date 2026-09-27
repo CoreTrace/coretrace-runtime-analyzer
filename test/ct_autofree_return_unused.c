@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// args: --ct-modules=trace,alloc --ct-autofree
+// expect: none
+// expect: output="auto-free ptr="
 #include <stdlib.h>
 
 void* bar(void)

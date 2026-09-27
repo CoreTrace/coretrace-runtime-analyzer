@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// realloc(p, 0) frees on glibc; macOS returns a new block that is never freed.
+// expect[linux]: none
+// expect[darwin]: rule=memory-leak cwe=CWE-401 level=warning alloc=10
 #include <stdlib.h>
 
 int main(void)

@@ -221,16 +221,28 @@ ctest --test-dir build --output-on-failure
 | `findings_unit`, `process_unit` | the report parser and the process runner (`unittests/`) |
 | `api_unit` | the library API: `Run` and `RunBatch` on real programs, a heap overflow, a compile-only run, a hang against the timeout, a batch, the refused and empty cases |
 | `consumer` | a project fetching this repository the way ctrace does (`unittests/consumer/`) configures, builds, links `coretrace::runtime-analyzer_lib` and analyzes a program |
-| `findings` | one fixture per finding kind (`test/findings/`) and the vtable fixtures: rule, CWE, location, exit status, SARIF and text output, batch mode |
+| `fixtures` | every source under `test/` states what it proves in its header (`// args:`, `// expect:`), and the analyzer proves it: findings with rule, CWE, level, faulting line and allocation site, or none; the program's exit status and output when stated. A fixture without an expectation fails (`test/check_fixtures.py`) |
+| `cli` | the text output, the SARIF log of a batch, and exit `2` for what cannot be analyzed (`test/cli/check_cli.py`) |
 | `timeout` | hung, stdin-reading and forking programs, alone and in a batch |
 | `compile_failure` | a source that fails code generation fails its own analysis only |
 | `hello_runs` | `test/examples/fixtures/hello.c` runs and its entry/exit events are collected |
-| `sweep_compiles` | every source under `test/` compiles (`--test-dir test --no-run`) |
-| `sweep_runs` | every binary runs without a timeout (`--test-dir test --timeout 10 -- --ct-modules=alloc`) |
+| `sweep_runs` | batch mode over the whole tree: every fixture builds, with the per-source heuristics, and runs without a timeout (`--test-dir test --timeout 10 -- --ct-modules=alloc`) |
 | `version` | `--version` prints the `project()` version |
 | `llvm_floor` | configuration fails against an LLVM below the floor |
 | `shipped_toolchain_unit` | the CLI points coretrace-compiler at the Clang headers shipped next to it, unless `CT_CLANG` is set |
 | `install_layout` | `cmake --install` lays out the CLI, library, headers and Clang headers, and the installed CLI builds and runs a program |
+
+A new fixture is a source under `test/` whose header states its compiler arguments and what the
+analyzer must report, for example:
+
+```c
+// args: --ct-modules=alloc,vtable --ct-vtable-diag
+// expect: rule=vtable-null-this cwe=CWE-476 level=error line=11
+```
+
+`expect: none` states that nothing is reported; `expect: program-exit=3` and
+`expect: output="..."` check the program itself; `expect[linux]:` and `expect[darwin]:` keep a
+line to one platform. `test/check_fixtures.py` documents the keys.
 
 The `Build` workflow runs this suite on Ubuntu 24.04 and macOS against LLVM 20 for every push and
 pull request. `clang-format` (version 17) is checked by the `clang-format` workflow.

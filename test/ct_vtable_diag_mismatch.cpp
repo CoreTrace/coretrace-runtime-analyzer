@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+// args: --ct-modules=alloc,vtable --ct-vtable-diag
+// expect: rule=vtable-type-mismatch cwe=CWE-843 level=warning line=41
 #include <cstdio>
 #include <dlfcn.h>
 
@@ -36,7 +38,7 @@ int main()
         return 1;
     }
 
-    __ct_vcall_trace(base, target, "ct_vtable_diag_mismatch.cpp:24:5", "Base");
+    __ct_vcall_trace(base, target, "ct_vtable_diag_mismatch.cpp:41:5", "Base");
 
     return 0;
 }

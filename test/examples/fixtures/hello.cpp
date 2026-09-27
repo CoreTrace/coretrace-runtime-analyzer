@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+// expect: none
 #include <string>
 
 int main()

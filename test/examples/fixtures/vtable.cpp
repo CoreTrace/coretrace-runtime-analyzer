@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+// expect: none
+// expect: program-exit=1
 struct Base
 {
     virtual ~Base() = default;
