@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+// expect: rule=memory-leak cwe=CWE-401 level=warning alloc=7
 #include <stdlib.h>
 
 int main(void)

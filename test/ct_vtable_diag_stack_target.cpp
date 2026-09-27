@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+// args: --ct-modules=alloc,vtable --ct-vtable-diag
+// expect: rule=vcall-invalid-target cwe=CWE-843 level=error line=34
 #include <cstdio>
 
 extern "C" void __ct_vcall_trace(void* this_ptr, void* target, const char* site,
@@ -29,7 +31,7 @@ int main()
     Base* base = &obj;
     int local = 42;
 
-    __ct_vcall_trace(base, &local, "ct_vtable_diag_stack_target.cpp:25:5", "Derived");
+    __ct_vcall_trace(base, &local, "ct_vtable_diag_stack_target.cpp:34:5", "Derived");
 
     return 0;
 }

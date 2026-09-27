@@ -286,9 +286,15 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   if(BUILD_CLI)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
-      add_test(NAME findings
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/findings/check_findings.py"
-                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/findings")
+      # Every fixture under test/ states what it proves in its header; a fixture without an
+      # expectation fails.
+      add_test(NAME fixtures
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/check_fixtures.py"
+                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_SOURCE_DIR}/test"
+                "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
+      add_test(NAME cli
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/cli/check_cli.py"
+                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/cli")
       add_test(NAME timeout
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/timeout/check_timeout.py"
                 $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/timeout")
@@ -305,15 +311,10 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
       COMMAND sh -c "\"$<TARGET_FILE:${TOOL_NAME}>\" -o \"${CMAKE_CURRENT_BINARY_DIR}/hello\" -- test/examples/fixtures/hello.c > \"${_hello_out}\" && grep -q 'entry_events=[1-9]' \"${_hello_out}\" && grep -q 'exit_events=[1-9]' \"${_hello_out}\""
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
-    # Every source under test/ compiles: the sweep exits 0 only when no test fails to build.
-    add_test(NAME sweep_compiles
-      COMMAND $<TARGET_FILE:${TOOL_NAME}> --test-dir test --no-run
-              --output-dir "${CMAKE_CURRENT_BINARY_DIR}/sweep"
-      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
-
-    # Every binary runs to completion within the timeout. Several fixtures report findings on
-    # purpose, so the exit status is 1: the pass expression makes CTest ignore it, and any
-    # [TIMEOUT] or [COMPILE] record fails the test.
+    # Batch mode over the whole tree, with its per-source heuristics (C sources that are C++,
+    # DEBUG): every fixture builds and runs to completion within the timeout. Several report
+    # findings on purpose, so the exit status is 1: the pass expression makes CTest ignore it,
+    # and any [TIMEOUT] or [COMPILE] record fails the test.
     add_test(NAME sweep_runs
       COMMAND $<TARGET_FILE:${TOOL_NAME}> --test-dir test --timeout 10
               --output-dir "${CMAKE_CURRENT_BINARY_DIR}/sweep-run" -- --ct-modules=alloc

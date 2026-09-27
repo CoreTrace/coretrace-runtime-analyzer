@@ -81,10 +81,10 @@ namespace
         // relative path: only its tail is checked.
         Expect(finding.location &&
                    finding.location->file.ends_with("findings/heap_overflow_write.c") &&
-                   finding.location->line == 7 && finding.location->column > 0,
+                   finding.location->line == 8 && finding.location->column > 0,
                "overflow: located at the faulting write in the source");
         Expect(finding.allocation && finding.allocation->file == finding.location->file &&
-                   finding.allocation->line == 6,
+                   finding.allocation->line == 7,
                "overflow: the allocation site, in the same source");
     }
 

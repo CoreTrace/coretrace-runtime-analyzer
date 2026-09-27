@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+// args: --ct-modules=alloc,vtable --ct-vtable-diag
+// expect: none
 #include <cstdio>
 
 struct IFace

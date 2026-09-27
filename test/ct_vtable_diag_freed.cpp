@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+// args: --ct-modules=alloc,vtable --ct-vtable-diag
+// expect: rule=vtable-use-after-free cwe=CWE-416 level=error line=33
 #include <cstdio>
 
 extern "C" void __ct_vtable_dump(void* this_ptr, const char* site, const char* static_type);
@@ -28,7 +30,7 @@ int main()
     delete ptr;
 
     // UB: intentionally using a freed pointer to trigger the diagnostic.
-    __ct_vtable_dump(ptr, "ct_vtable_diag_freed.cpp:22:5", "Derived");
+    __ct_vtable_dump(ptr, "ct_vtable_diag_freed.cpp:33:5", "Derived");
 
     return 0;
 }

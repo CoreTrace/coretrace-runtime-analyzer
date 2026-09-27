@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+// args: --ct-modules=alloc,vtable --ct-vtable-diag
+// expect: rule=vtable-corrupted cwe=CWE-843 level=error line=31
 #include <cstdio>
 #include <cstdlib>
 
@@ -26,7 +28,7 @@ int main()
     FakeObject obj{};
     obj.vptr = &table[2]; // vtable pointer points to heap (unresolvable module)
 
-    __ct_vtable_dump(&obj, "ct_vtable_diag_fake.cpp:22:5", "FakeObject");
+    __ct_vtable_dump(&obj, "ct_vtable_diag_fake.cpp:31:5", "FakeObject");
 
     std::free(table);
     return 0;

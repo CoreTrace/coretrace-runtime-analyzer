@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// test/ct_vtable_uaf.cpp
+// The access faults before the vtable module sees the freed vptr: the alloc module
+// reports the use after free.
+// expect: rule=heap-use-after-free cwe=CWE-416 level=error line=27 alloc=24
 #include <cstdio>
 struct Base
 {

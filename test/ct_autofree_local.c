@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+// args: --ct-modules=trace,alloc --ct-autofree
+// expect: rule=memory-leak cwe=CWE-401 level=warning alloc=17
+// expect: rule=memory-leak cwe=CWE-401 level=warning alloc=18
+// expect: rule=memory-leak cwe=CWE-401 level=warning alloc=19
+// expect: output="auto-free ptr="
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>

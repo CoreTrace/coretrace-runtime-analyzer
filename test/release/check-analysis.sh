@@ -31,6 +31,6 @@ fail() {
     exit 1
 }
 [ "$status" -eq 1 ] || fail "expected exit status 1 (findings), got $status"
-printf '%s\n' "$output" | grep -q 'heap_overflow_write.c:7:15: error: heap-buffer-overflow WRITE of size 4' ||
+printf '%s\n' "$output" | grep -q 'heap_overflow_write.c:8:15: error: heap-buffer-overflow WRITE of size 4' ||
     fail "the heap overflow of heap_overflow_write.c is not reported"
 echo "PASS: runtime-analyzer analyzes C from $prefix without an installed clang"

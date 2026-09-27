@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+// args: --ct-modules=trace,alloc --ct-autofree
+// expect: none
 #include <unistd.h>
 
 int main(void)
