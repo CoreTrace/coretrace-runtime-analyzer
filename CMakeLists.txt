@@ -293,25 +293,25 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     COMMAND sh -c "rm -rf \"${_consumer}\" && ${CMAKE_COMMAND} -S \"${CMAKE_CURRENT_SOURCE_DIR}/unittests/consumer\" -B \"${_consumer}\" -G \"${CMAKE_GENERATOR}\" -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_C_COMPILER=\"${CMAKE_C_COMPILER}\" -DCMAKE_CXX_COMPILER=\"${CMAKE_CXX_COMPILER}\" -DLLVM_DIR=\"${LLVM_DIR}\" -DClang_DIR=\"${Clang_DIR}\" -DFETCHCONTENT_SOURCE_DIR_RUNTIME_ANALYZER=\"${CMAKE_CURRENT_SOURCE_DIR}\" -DFETCHCONTENT_SOURCE_DIR_CC=\"${cc_SOURCE_DIR}\" -DFETCHCONTENT_SOURCE_DIR_CORETRACE_LOGGER=\"${coretrace_logger_SOURCE_DIR}\" && ${CMAKE_COMMAND} --build \"${_consumer}\" --parallel && \"${_consumer}/consumer\" \"${CMAKE_CURRENT_SOURCE_DIR}/test/findings/heap_overflow_write.c\" \"${_consumer}/heap_overflow_write\" | grep -x 'heap-buffer-overflow CWE-122'")
 
   if(BUILD_CLI)
-    find_package(Python3 COMPONENTS Interpreter)
-    if(Python3_Interpreter_FOUND)
-      # Every fixture under test/ states what it proves in its header; a fixture without an
-      # expectation fails.
-      add_test(NAME fixtures
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/check_fixtures.py"
-                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_SOURCE_DIR}/test"
-                "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
-      add_test(NAME cli
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/cli/check_cli.py"
-                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/cli")
-      add_test(NAME timeout
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/timeout/check_timeout.py"
-                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/timeout")
-      add_test(NAME compile_failure
-        COMMAND ${Python3_EXECUTABLE}
-                "${CMAKE_CURRENT_SOURCE_DIR}/test/compile_failure/check_compile_failure.py"
-                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/compile_failure")
-    endif()
+    # The Python tests are part of the suite: without an interpreter, configuration fails
+    # rather than silently dropping them.
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    # Every fixture under test/ states what it proves in its header; a fixture without an
+    # expectation fails.
+    add_test(NAME fixtures
+      COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/check_fixtures.py"
+              $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_SOURCE_DIR}/test"
+              "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
+    add_test(NAME cli
+      COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/cli/check_cli.py"
+              $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/cli")
+    add_test(NAME timeout
+      COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/timeout/check_timeout.py"
+              $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/timeout")
+    add_test(NAME compile_failure
+      COMMAND ${Python3_EXECUTABLE}
+              "${CMAKE_CURRENT_SOURCE_DIR}/test/compile_failure/check_compile_failure.py"
+              $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/compile_failure")
 
     # A program runs and its entry/exit events are collected. A shell checks the exit status
     # and the summary together: PASS_REGULAR_EXPRESSION alone would ignore the status.
