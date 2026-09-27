@@ -222,7 +222,7 @@ ctest --test-dir build --output-on-failure
 | `api_unit` | the library API: `Run` and `RunBatch` on real programs, a heap overflow, a compile-only run, a hang against the timeout, a batch, the refused and empty cases |
 | `consumer` | a project fetching this repository the way ctrace does (`unittests/consumer/`) configures, builds, links `coretrace::runtime-analyzer_lib` and analyzes a program |
 | `fixtures` | every source under `test/` states what it proves in its header (`// args:`, `// expect:`), and the analyzer proves it: findings with rule, CWE, level, faulting line and allocation site, or none; the program's exit status and output when stated. A fixture without an expectation fails (`test/check_fixtures.py`) |
-| `cli` | the text output, the SARIF log of a batch, and exit `2` for what cannot be analyzed (`test/cli/check_cli.py`) |
+| `cli` | every option as the table above states it, the text output, the SARIF log of a batch, and exit `2` with a message for invalid arguments and for what cannot be analyzed (`test/cli/check_cli.py`) |
 | `timeout` | hung, stdin-reading and forking programs, alone and in a batch |
 | `compile_failure` | a source that fails code generation fails its own analysis only |
 | `hello_runs` | `test/examples/fixtures/hello.c` runs and its entry/exit events are collected |
