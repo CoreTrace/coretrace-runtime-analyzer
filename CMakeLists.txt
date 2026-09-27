@@ -123,6 +123,9 @@ function(coretrace_add_tool)
         ${CTOOL_SOURCES}
     )
 
+    # The public header uses C++20; a consumer's own targets inherit the requirement.
+    target_compile_features(${_lib_target} PUBLIC cxx_std_20)
+
     # Public headers live in include/
     target_include_directories(${_lib_target}
         PUBLIC
@@ -266,6 +269,19 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   target_include_directories(shipped_toolchain_test PRIVATE src)
   target_link_libraries(shipped_toolchain_test PRIVATE ${TOOL_NAME}_lib)
   add_test(NAME shipped_toolchain_unit COMMAND shipped_toolchain_test)
+
+  # The library API as a consumer links it: Run and RunBatch on real programs.
+  add_executable(api_test unittests/api_test.cpp)
+  target_link_libraries(api_test PRIVATE ${TOOL_NAME}_lib)
+  add_test(NAME api_unit
+    COMMAND api_test "${CMAKE_CURRENT_SOURCE_DIR}/test" "${CMAKE_CURRENT_BINARY_DIR}/api")
+
+  # A project consuming the library through FetchContent, as ctrace does, configures, builds
+  # and analyzes a program. The dependencies fetched here are reused, not cloned again.
+  FetchContent_GetProperties(coretrace_logger)
+  set(_consumer "${CMAKE_CURRENT_BINARY_DIR}/consumer")
+  add_test(NAME consumer
+    COMMAND sh -c "rm -rf \"${_consumer}\" && ${CMAKE_COMMAND} -S \"${CMAKE_CURRENT_SOURCE_DIR}/unittests/consumer\" -B \"${_consumer}\" -G \"${CMAKE_GENERATOR}\" -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_C_COMPILER=\"${CMAKE_C_COMPILER}\" -DCMAKE_CXX_COMPILER=\"${CMAKE_CXX_COMPILER}\" -DLLVM_DIR=\"${LLVM_DIR}\" -DClang_DIR=\"${Clang_DIR}\" -DFETCHCONTENT_SOURCE_DIR_RUNTIME_ANALYZER=\"${CMAKE_CURRENT_SOURCE_DIR}\" -DFETCHCONTENT_SOURCE_DIR_CC=\"${cc_SOURCE_DIR}\" -DFETCHCONTENT_SOURCE_DIR_CORETRACE_LOGGER=\"${coretrace_logger_SOURCE_DIR}\" && ${CMAKE_COMMAND} --build \"${_consumer}\" --parallel && \"${_consumer}/consumer\" \"${CMAKE_CURRENT_SOURCE_DIR}/test/findings/heap_overflow_write.c\" \"${_consumer}/heap_overflow_write\" | grep -x 'heap-buffer-overflow CWE-122'")
 
   if(BUILD_CLI)
     find_package(Python3 COMPONENTS Interpreter)
