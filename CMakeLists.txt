@@ -14,6 +14,8 @@ set(TOOL_NAMESPACE "coretrace" CACHE STRING "CMake namespace for ALIAS targets")
 
 # Library sources (add/remove files here)
 set(TOOL_SOURCES
+    src/cli_args.cpp
+    src/events.cpp
     src/findings.cpp
     src/process.cpp
     src/runtime_analyzer.cpp
@@ -269,6 +271,13 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   target_include_directories(shipped_toolchain_test PRIVATE src)
   target_link_libraries(shipped_toolchain_test PRIVATE ${TOOL_NAME}_lib)
   add_test(NAME shipped_toolchain_unit COMMAND shipped_toolchain_test)
+
+  foreach(_unit cli_args events sarif)
+    add_executable(${_unit}_test unittests/${_unit}_test.cpp)
+    target_include_directories(${_unit}_test PRIVATE src)
+    target_link_libraries(${_unit}_test PRIVATE ${TOOL_NAME}_lib)
+    add_test(NAME ${_unit}_unit COMMAND ${_unit}_test)
+  endforeach()
 
   # The library API as a consumer links it: Run and RunBatch on real programs.
   add_executable(api_test unittests/api_test.cpp)

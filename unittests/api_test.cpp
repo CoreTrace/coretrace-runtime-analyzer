@@ -3,6 +3,8 @@
 // compiled with coretrace-compiler, executed, and reported through the public structures.
 #include "runtime_analyzer.hpp"
 
+#include "expect.hpp"
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -20,23 +22,14 @@ namespace
     using coretrace::runtime_analyzer::Run;
     using coretrace::runtime_analyzer::RunBatch;
     using coretrace::runtime_analyzer::Severity;
+    using unittests::Expect;
 
     constexpr std::string_view kHang = "#include <unistd.h>\nint main(void)\n{\n    for (;;)\n"
                                        "        pause();\n}\n";
     constexpr std::string_view kNormal = "int main(void)\n{\n    return 0;\n}\n";
 
-    int failures = 0;
     std::filesystem::path fixtures; // the repository's test/ directory
     std::filesystem::path work;     // scratch directory, outside test/ (the sweeps run it)
-
-    void Expect(bool condition, std::string_view what)
-    {
-        std::cout << (condition ? "[PASS] " : "[FAIL] ") << what << '\n';
-        if (!condition)
-        {
-            ++failures;
-        }
-    }
 
     [[nodiscard]] bool Contains(std::string_view text, std::string_view needle)
     {
@@ -194,11 +187,5 @@ int main(int argc, char** argv)
     RunBatchReportsEachSource();
     RefusesCompileOnlyFlagsWithARun();
     EmptyBatchIsNotAnalyzed();
-    if (failures != 0)
-    {
-        std::cerr << failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "api_test: all checks passed\n";
-    return 0;
+    return unittests::Finish("api_test");
 }

@@ -2,6 +2,8 @@
 // Checks the process runner on small shell commands.
 #include "process.hpp"
 
+#include "expect.hpp"
+
 #include <chrono>
 #include <iostream>
 #include <string_view>
@@ -11,17 +13,7 @@ namespace
     using coretrace::runtime_analyzer::ProcessResult;
     using coretrace::runtime_analyzer::ProcessSpec;
     using coretrace::runtime_analyzer::RunProcess;
-
-    int failures = 0;
-
-    void Expect(bool condition, std::string_view what)
-    {
-        std::cout << (condition ? "[PASS] " : "[FAIL] ") << what << '\n';
-        if (!condition)
-        {
-            ++failures;
-        }
-    }
+    using unittests::Expect;
 
     [[nodiscard]] ProcessSpec Shell(std::string script)
     {
@@ -94,11 +86,5 @@ int main()
     TimeoutKeepsTheOutputSoFar();
     TimeoutKillsTheWholeProcessGroup();
     NoTimeoutWaitsForTheProgram();
-    if (failures != 0)
-    {
-        std::cerr << failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "process_test: all checks passed\n";
-    return 0;
+    return unittests::Finish("process_test");
 }

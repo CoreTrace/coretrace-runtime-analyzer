@@ -2,6 +2,8 @@
 // Checks the runtime report parser against output captured from CoreTrace's runtime.
 #include "findings.hpp"
 
+#include "expect.hpp"
+
 #include <iostream>
 #include <string_view>
 
@@ -11,17 +13,7 @@ namespace
     using coretrace::runtime_analyzer::ParseFindings;
     using coretrace::runtime_analyzer::Severity;
     using coretrace::runtime_analyzer::SourceLocation;
-
-    int failures = 0;
-
-    void Expect(bool condition, std::string_view what)
-    {
-        std::cout << (condition ? "[PASS] " : "[FAIL] ") << what << '\n';
-        if (!condition)
-        {
-            ++failures;
-        }
-    }
+    using unittests::Expect;
 
     [[nodiscard]] bool IsAt(const std::optional<SourceLocation>& location, std::string_view file,
                             unsigned line, unsigned column)
@@ -317,11 +309,5 @@ int main()
     VtableInfoBoxIsTracing();
     VcallBoxJoinsWrappedValues();
     VtableRulesByWarning();
-    if (failures != 0)
-    {
-        std::cerr << failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "findings_test: all checks passed\n";
-    return 0;
+    return unittests::Finish("findings_test");
 }
