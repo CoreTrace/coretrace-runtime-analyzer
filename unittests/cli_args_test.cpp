@@ -232,6 +232,17 @@ namespace
                "artifact name: only letters, digits, - and _ survive");
         Expect(SanitizeArtifactName("") == "test", "artifact name: 'test' for an empty path");
 
+        // Batch sources exist, and their path is taken relative to the working directory.
+        const std::filesystem::path root =
+            std::filesystem::temp_directory_path() / "cli_args_artifacts";
+        std::filesystem::remove_all(root);
+        for (const char* source : {"dir/a.c", "dir/b.c", "other/a.c"})
+        {
+            std::filesystem::create_directories((root / source).parent_path());
+            std::ofstream(root / source) << "int main(void) { return 0; }\n";
+        }
+        std::filesystem::current_path(root);
+
         AnalyzerOptions options;
         options.output_directory = "out";
         const std::filesystem::path first = MakeTestOutputPath(options, "dir/a.c");
