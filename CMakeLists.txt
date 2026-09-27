@@ -42,6 +42,11 @@ set(LLVM_COMPONENTS
     support
 )
 
+# Source-based coverage of this project's own code (scripts/ci/coverage.sh reads it): the
+# library, the CLI and the unit tests are built at -O0 and instrumented; fetched dependencies
+# are not.
+option(CORETRACE_COVERAGE "Instrument this project's own targets for llvm-cov (Clang only)" OFF)
+
 # CoreTrace compiler dependency
 option(CORETRACE_FETCH_COMPILERLIB "Fetch coretrace-compiler via FetchContent if needed" ON)
 set(CORETRACE_COMPILER_GIT_REPOSITORY "https://github.com/CoreTrace/coretrace-compiler.git" CACHE STRING "coretrace-compiler repository")
@@ -73,6 +78,17 @@ check_llvm_version(${LLVM_MIN_REQUIRED_VERSION})
 set(TOOL_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
 configure_file(cmake/runtime_analyzer_version.hpp.in
                "${TOOL_GENERATED_INCLUDE_DIR}/runtime_analyzer_version.hpp" @ONLY)
+
+if(CORETRACE_COVERAGE AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "CORETRACE_COVERAGE needs Clang: it uses source-based coverage")
+endif()
+
+function(coretrace_enable_coverage target)
+    if(CORETRACE_COVERAGE)
+        target_compile_options(${target} PRIVATE -O0 -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(${target} PRIVATE -fprofile-instr-generate)
+    endif()
+endfunction()
 
 include(FetchContent)
 
@@ -163,6 +179,8 @@ function(coretrace_add_tool)
         target_link_libraries(${_lib_target} PUBLIC ${_llvm_libs})
     endif()
 
+    coretrace_enable_coverage(${_lib_target})
+
     # ALIAS for FetchContent consumers
     add_library(${CTOOL_NAMESPACE}::${_lib_target} ALIAS ${_lib_target})
 
@@ -176,6 +194,7 @@ function(coretrace_add_tool)
             ${CTOOL_CLI_SOURCE}
         )
         target_link_libraries(${CTOOL_NAME} PRIVATE ${_lib_target})
+        coretrace_enable_coverage(${CTOOL_NAME})
     endif()
 endfunction()
 
@@ -260,28 +279,33 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   add_executable(findings_test unittests/findings_test.cpp)
   target_include_directories(findings_test PRIVATE src)
   target_link_libraries(findings_test PRIVATE ${TOOL_NAME}_lib)
+  coretrace_enable_coverage(findings_test)
   add_test(NAME findings_unit COMMAND findings_test)
 
   add_executable(process_test unittests/process_test.cpp)
   target_include_directories(process_test PRIVATE src)
   target_link_libraries(process_test PRIVATE ${TOOL_NAME}_lib)
+  coretrace_enable_coverage(process_test)
   add_test(NAME process_unit COMMAND process_test)
 
   add_executable(shipped_toolchain_test unittests/shipped_toolchain_test.cpp)
   target_include_directories(shipped_toolchain_test PRIVATE src)
   target_link_libraries(shipped_toolchain_test PRIVATE ${TOOL_NAME}_lib)
+  coretrace_enable_coverage(shipped_toolchain_test)
   add_test(NAME shipped_toolchain_unit COMMAND shipped_toolchain_test)
 
   foreach(_unit cli_args events sarif)
     add_executable(${_unit}_test unittests/${_unit}_test.cpp)
     target_include_directories(${_unit}_test PRIVATE src)
     target_link_libraries(${_unit}_test PRIVATE ${TOOL_NAME}_lib)
+    coretrace_enable_coverage(${_unit}_test)
     add_test(NAME ${_unit}_unit COMMAND ${_unit}_test)
   endforeach()
 
   # The library API as a consumer links it: Run and RunBatch on real programs.
   add_executable(api_test unittests/api_test.cpp)
   target_link_libraries(api_test PRIVATE ${TOOL_NAME}_lib)
+  coretrace_enable_coverage(api_test)
   add_test(NAME api_unit
     COMMAND api_test "${CMAKE_CURRENT_SOURCE_DIR}/test" "${CMAKE_CURRENT_BINARY_DIR}/api")
 

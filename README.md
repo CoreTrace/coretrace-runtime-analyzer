@@ -248,7 +248,12 @@ analyzer must report, for example:
 line to one platform. `test/check_fixtures.py` documents the keys.
 
 The `Build` workflow runs this suite on Ubuntu 24.04 and macOS against LLVM 20 for every push and
-pull request. `clang-format` (version 17) is checked by the `clang-format` workflow.
+pull request. Its `coverage` job measures how much of `src/`, `include/` and `main.cpp` the
+suite runs, with `llvm-cov` on a Clang build configured with `-DCORETRACE_COVERAGE=ON`: the
+totals go to the job summary, the report to an artifact, and the job fails when the line
+coverage drops below the floor set in the workflow. The same measure runs locally with
+`scripts/ci/coverage.sh <build dir> <output dir> [<floor>]`, through `xcrun` on macOS.
+`clang-format` (version 17) is checked by the `clang-format` workflow.
 
 ## Releasing
 

@@ -46,5 +46,7 @@ runtime-analyzer-artifacts/
 # Python cache
 __pycache__/
 
-# Build tree
+# Build trees and coverage reports
 build/
+build-*/
+coverage/
