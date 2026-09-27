@@ -42,6 +42,11 @@ set(LLVM_COMPONENTS
     support
 )
 
+# Source-based coverage of this project's own code (scripts/ci/coverage.sh reads it): the
+# library, the CLI and the unit tests are built at -O0 and instrumented; fetched dependencies
+# are not.
+option(CORETRACE_COVERAGE "Instrument this project's own targets for llvm-cov (Clang only)" OFF)
+
 # CoreTrace compiler dependency
 option(CORETRACE_FETCH_COMPILERLIB "Fetch coretrace-compiler via FetchContent if needed" ON)
 set(CORETRACE_COMPILER_GIT_REPOSITORY "https://github.com/CoreTrace/coretrace-compiler.git" CACHE STRING "coretrace-compiler repository")
@@ -73,6 +78,17 @@ check_llvm_version(${LLVM_MIN_REQUIRED_VERSION})
 set(TOOL_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
 configure_file(cmake/runtime_analyzer_version.hpp.in
                "${TOOL_GENERATED_INCLUDE_DIR}/runtime_analyzer_version.hpp" @ONLY)
+
+if(CORETRACE_COVERAGE AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "CORETRACE_COVERAGE needs Clang: it uses source-based coverage")
+endif()
+
+function(coretrace_enable_coverage target)
+    if(CORETRACE_COVERAGE)
+        target_compile_options(${target} PRIVATE -O0 -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(${target} PRIVATE -fprofile-instr-generate)
+    endif()
+endfunction()
 
 include(FetchContent)
 
@@ -163,6 +179,8 @@ function(coretrace_add_tool)
         target_link_libraries(${_lib_target} PUBLIC ${_llvm_libs})
     endif()
 
+    coretrace_enable_coverage(${_lib_target})
+
     # ALIAS for FetchContent consumers
     add_library(${CTOOL_NAMESPACE}::${_lib_target} ALIAS ${_lib_target})
 
@@ -176,6 +194,7 @@ function(coretrace_add_tool)
             ${CTOOL_CLI_SOURCE}
         )
         target_link_libraries(${CTOOL_NAME} PRIVATE ${_lib_target})
+        coretrace_enable_coverage(${CTOOL_NAME})
     endif()
 endfunction()
 
@@ -260,28 +279,33 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
   add_executable(findings_test unittests/findings_test.cpp)
   target_include_directories(findings_test PRIVATE src)
   target_link_libraries(findings_test PRIVATE ${TOOL_NAME}_lib)
+  coretrace_enable_coverage(findings_test)
   add_test(NAME findings_unit COMMAND findings_test)
 
   add_executable(process_test unittests/process_test.cpp)
   target_include_directories(process_test PRIVATE src)
   target_link_libraries(process_test PRIVATE ${TOOL_NAME}_lib)
+  coretrace_enable_coverage(process_test)
   add_test(NAME process_unit COMMAND process_test)
 
   add_executable(shipped_toolchain_test unittests/shipped_toolchain_test.cpp)
   target_include_directories(shipped_toolchain_test PRIVATE src)
   target_link_libraries(shipped_toolchain_test PRIVATE ${TOOL_NAME}_lib)
+  coretrace_enable_coverage(shipped_toolchain_test)
   add_test(NAME shipped_toolchain_unit COMMAND shipped_toolchain_test)
 
   foreach(_unit cli_args events sarif)
     add_executable(${_unit}_test unittests/${_unit}_test.cpp)
     target_include_directories(${_unit}_test PRIVATE src)
     target_link_libraries(${_unit}_test PRIVATE ${TOOL_NAME}_lib)
+    coretrace_enable_coverage(${_unit}_test)
     add_test(NAME ${_unit}_unit COMMAND ${_unit}_test)
   endforeach()
 
   # The library API as a consumer links it: Run and RunBatch on real programs.
   add_executable(api_test unittests/api_test.cpp)
   target_link_libraries(api_test PRIVATE ${TOOL_NAME}_lib)
+  coretrace_enable_coverage(api_test)
   add_test(NAME api_unit
     COMMAND api_test "${CMAKE_CURRENT_SOURCE_DIR}/test" "${CMAKE_CURRENT_BINARY_DIR}/api")
 
@@ -293,25 +317,25 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     COMMAND sh -c "rm -rf \"${_consumer}\" && ${CMAKE_COMMAND} -S \"${CMAKE_CURRENT_SOURCE_DIR}/unittests/consumer\" -B \"${_consumer}\" -G \"${CMAKE_GENERATOR}\" -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_C_COMPILER=\"${CMAKE_C_COMPILER}\" -DCMAKE_CXX_COMPILER=\"${CMAKE_CXX_COMPILER}\" -DLLVM_DIR=\"${LLVM_DIR}\" -DClang_DIR=\"${Clang_DIR}\" -DFETCHCONTENT_SOURCE_DIR_RUNTIME_ANALYZER=\"${CMAKE_CURRENT_SOURCE_DIR}\" -DFETCHCONTENT_SOURCE_DIR_CC=\"${cc_SOURCE_DIR}\" -DFETCHCONTENT_SOURCE_DIR_CORETRACE_LOGGER=\"${coretrace_logger_SOURCE_DIR}\" && ${CMAKE_COMMAND} --build \"${_consumer}\" --parallel && \"${_consumer}/consumer\" \"${CMAKE_CURRENT_SOURCE_DIR}/test/findings/heap_overflow_write.c\" \"${_consumer}/heap_overflow_write\" | grep -x 'heap-buffer-overflow CWE-122'")
 
   if(BUILD_CLI)
-    find_package(Python3 COMPONENTS Interpreter)
-    if(Python3_Interpreter_FOUND)
-      # Every fixture under test/ states what it proves in its header; a fixture without an
-      # expectation fails.
-      add_test(NAME fixtures
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/check_fixtures.py"
-                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_SOURCE_DIR}/test"
-                "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
-      add_test(NAME cli
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/cli/check_cli.py"
-                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/cli")
-      add_test(NAME timeout
-        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/timeout/check_timeout.py"
-                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/timeout")
-      add_test(NAME compile_failure
-        COMMAND ${Python3_EXECUTABLE}
-                "${CMAKE_CURRENT_SOURCE_DIR}/test/compile_failure/check_compile_failure.py"
-                $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/compile_failure")
-    endif()
+    # The Python tests are part of the suite: without an interpreter, configuration fails
+    # rather than silently dropping them.
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    # Every fixture under test/ states what it proves in its header; a fixture without an
+    # expectation fails.
+    add_test(NAME fixtures
+      COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/check_fixtures.py"
+              $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_SOURCE_DIR}/test"
+              "${CMAKE_CURRENT_BINARY_DIR}/fixtures")
+    add_test(NAME cli
+      COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/cli/check_cli.py"
+              $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/cli")
+    add_test(NAME timeout
+      COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/test/timeout/check_timeout.py"
+              $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/timeout")
+    add_test(NAME compile_failure
+      COMMAND ${Python3_EXECUTABLE}
+              "${CMAKE_CURRENT_SOURCE_DIR}/test/compile_failure/check_compile_failure.py"
+              $<TARGET_FILE:${TOOL_NAME}> "${CMAKE_CURRENT_BINARY_DIR}/compile_failure")
 
     # A program runs and its entry/exit events are collected. A shell checks the exit status
     # and the summary together: PASS_REGULAR_EXPRESSION alone would ignore the status.

@@ -50,3 +50,53 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  # How much of this project's own code the suite runs, from a Clang build with
+  # -DCORETRACE_COVERAGE=ON (scripts/ci/coverage.sh): the totals in the job summary, the report
+  # as an artifact, and a failure below the line-coverage floor.
+  coverage:
+    name: Coverage (llvm-cov)
+    runs-on: ubuntu-24.04
+    env:
+      # Lines of src/, include/ and main.cpp the suite must run: 89.20% reached on
+      # 2026-09-27 (#21). Raise it as tests land.
+      COVERAGE_FLOOR: 89
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM ${{ env.LLVM_VERSION }} with its profile runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash /tmp/llvm.sh "$LLVM_VERSION"
+          sudo apt-get install -y "llvm-$LLVM_VERSION-dev" "libclang-$LLVM_VERSION-dev" \
+            "clang-$LLVM_VERSION" "libclang-rt-$LLVM_VERSION-dev"
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="clang-$LLVM_VERSION" -DCMAKE_CXX_COMPILER="clang++-$LLVM_VERSION" \
+            -DCORETRACE_COVERAGE=ON \
+            -DLLVM_DIR="/usr/lib/llvm-$LLVM_VERSION/lib/cmake/llvm" \
+            -DClang_DIR="/usr/lib/llvm-$LLVM_VERSION/lib/cmake/clang"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test and measure
+        env:
+          LLVM_PROFDATA: /usr/lib/llvm-${{ env.LLVM_VERSION }}/bin/llvm-profdata
+          LLVM_COV: /usr/lib/llvm-${{ env.LLVM_VERSION }}/bin/llvm-cov
+        run: sh scripts/ci/coverage.sh build coverage "$COVERAGE_FLOOR"
+
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage/report.txt
+            coverage/summary.md
+            coverage/html

@@ -59,9 +59,9 @@ link each instrumented program against the runtime, which is C++: `g++` on Debia
 
 ### From source
 
-Needs CMake 3.16 or later, a C++20 compiler, LLVM and Clang 19 or later with their CMake
-packages, and Python 3 for the tests. coretrace-compiler is fetched at configure time, at the
-release tag pinned in `CMakeLists.txt`.
+Needs CMake 3.21 or later, a C++20 compiler, LLVM and Clang 19 or later with their CMake
+packages, and Python 3, which the test suite runs (configuration fails without it).
+coretrace-compiler is fetched at configure time, at the release tag pinned in `CMakeLists.txt`.
 
 ```zsh
 # macOS: brew install llvm@20. Debian/Ubuntu: /usr/lib/llvm-20/lib/cmake/{llvm,clang}.
@@ -248,7 +248,12 @@ analyzer must report, for example:
 line to one platform. `test/check_fixtures.py` documents the keys.
 
 The `Build` workflow runs this suite on Ubuntu 24.04 and macOS against LLVM 20 for every push and
-pull request. `clang-format` (version 17) is checked by the `clang-format` workflow.
+pull request. Its `coverage` job measures how much of `src/`, `include/` and `main.cpp` the
+suite runs, with `llvm-cov` on a Clang build configured with `-DCORETRACE_COVERAGE=ON`: the
+totals go to the job summary, the report to an artifact, and the job fails when the line
+coverage drops below the floor set in the workflow. The same measure runs locally with
+`scripts/ci/coverage.sh <build dir> <output dir> [<floor>]`, through `xcrun` on macOS.
+`clang-format` (version 17) is checked by the `clang-format` workflow.
 
 ## Releasing
 
