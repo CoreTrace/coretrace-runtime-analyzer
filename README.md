@@ -219,6 +219,9 @@ ctest --test-dir build --output-on-failure
 | Test | Checks |
 |---|---|
 | `findings_unit`, `process_unit` | the report parser and the process runner (`unittests/`) |
+| `cli_args_unit` | argument parsing, every option and every invalid spelling, the compiler's `-o`, the compile-only and `-x` flags, the C-as-C++ and `DEBUG` heuristics, the compiler arguments of a run, the artifact names of a batch (`src/cli_args.hpp`) |
+| `events_unit` | the CoreTrace event lines of a run and their summary, ANSI colours stripped, and the verdict drawn from a result (`src/events.hpp`) |
+| `sarif_unit` | the SARIF writer against the exact log a consumer reads: empty, an error with its locations, a warning without one |
 | `api_unit` | the library API: `Run` and `RunBatch` on real programs, a heap overflow, a compile-only run, a hang against the timeout, a batch, the refused and empty cases |
 | `consumer` | a project fetching this repository the way ctrace does (`unittests/consumer/`) configures, builds, links `coretrace::runtime-analyzer_lib` and analyzes a program |
 | `fixtures` | every source under `test/` states what it proves in its header (`// args:`, `// expect:`), and the analyzer proves it: findings with rule, CWE, level, faulting line and allocation site, or none; the program's exit status and output when stated. A fixture without an expectation fails (`test/check_fixtures.py`) |

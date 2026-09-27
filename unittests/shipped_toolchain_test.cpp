@@ -2,6 +2,8 @@
 // Checks the rule that points coretrace-compiler at the Clang headers shipped next to the CLI.
 #include "shipped_toolchain.hpp"
 
+#include "expect.hpp"
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -14,17 +16,7 @@ namespace
 {
     using coretrace::runtime_analyzer::ShippedLinkArguments;
     using coretrace::runtime_analyzer::UseShippedClangHeaders;
-
-    int failures = 0;
-
-    void Expect(bool condition, std::string_view what)
-    {
-        std::cout << (condition ? "[PASS] " : "[FAIL] ") << what << '\n';
-        if (!condition)
-        {
-            ++failures;
-        }
-    }
+    using unittests::Expect;
 
     [[nodiscard]] std::string Env(const char* name)
     {
@@ -96,11 +88,5 @@ int main()
     LeavesTheUsersClangAlone();
     LinksAgainstTheShippedCxxRuntime();
     DoesNothingWithoutHeaders();
-    if (failures != 0)
-    {
-        std::cerr << failures << " check(s) failed\n";
-        return 1;
-    }
-    std::cout << "shipped_toolchain_test: all checks passed\n";
-    return 0;
+    return unittests::Finish("shipped_toolchain_test");
 }
