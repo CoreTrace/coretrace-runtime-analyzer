@@ -8,6 +8,15 @@ findings with a source location, as text or as a SARIF log.
 instrumentation enabled, runs the instrumented binary with a timeout and its stdin on `/dev/null`,
 captures its output, and turns each report of the CoreTrace runtime into a finding.
 
+## Repository documents
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [AUTHORS.md](AUTHORS.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [LICENSE](LICENSE)
+- [SECURITY.md](SECURITY.md)
+
 ## What It Detects
 
 | Rule | CWE | Locations |
