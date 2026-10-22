@@ -4,6 +4,8 @@
 
 #include "expect.hpp"
 
+#include <llvm/Support/JSON.h>
+
 #include <sstream>
 #include <string>
 #include <vector>
@@ -141,6 +143,59 @@ namespace
         Expect(Sarif({finding}) == expected,
                "one warning: no locations, no column when the runtime gave none");
     }
+
+    // The one run of the log Sarif() writes for `findings`.
+    [[nodiscard]] llvm::json::Object Run(const std::vector<Finding>& findings)
+    {
+        llvm::Expected<llvm::json::Value> log = llvm::json::parse(Sarif(findings));
+        if (!log)
+        {
+            llvm::consumeError(log.takeError());
+            return {};
+        }
+        const llvm::json::Array* runs = log->getAsObject()->getArray("runs");
+        return runs != nullptr && !runs->empty() ? *(*runs)[0].getAsObject() : llvm::json::Object{};
+    }
+
+    [[nodiscard]] Finding OfRule(std::string rule)
+    {
+        return Finding{std::move(rule), "CWE-0", Severity::Error, "m", std::nullopt, std::nullopt};
+    }
+
+    // A SARIF consumer (GitHub code scanning, an IDE, CoreTrace's merged log) explains a finding
+    // from its rule: every rule the analyzer reports is listed once, with a title and a
+    // description.
+    void EveryRuleIsDescribed()
+    {
+        const std::vector<std::string> rules = {
+            "heap-buffer-overflow",  "stack-buffer-overflow", "heap-use-after-free",
+            "double-free",           "memory-leak",           "vtable-null-this",
+            "vtable-use-after-free", "vtable-corrupted",      "vcall-invalid-target",
+            "vtable-type-mismatch",  "vtable-diagnostic"};
+        for (const std::string& rule : rules)
+        {
+            llvm::json::Object run = Run({OfRule(rule), OfRule(rule)});
+            const llvm::json::Object* driver = run.getObject("tool") != nullptr
+                                                   ? run.getObject("tool")->getObject("driver")
+                                                   : nullptr;
+            const llvm::json::Array* listed =
+                driver != nullptr ? driver->getArray("rules") : nullptr;
+            const llvm::json::Object* entry =
+                listed != nullptr && listed->size() == 1 ? (*listed)[0].getAsObject() : nullptr;
+            const auto text = [&](llvm::StringRef key) -> llvm::StringRef
+            {
+                const llvm::json::Object* message =
+                    entry != nullptr ? entry->getObject(key) : nullptr;
+                const std::optional<llvm::StringRef> value =
+                    message != nullptr ? message->getString("text") : std::nullopt;
+                return value.value_or("");
+            };
+            Expect(entry != nullptr && entry->getString("id") == rule &&
+                       !text("shortDescription").empty() && !text("fullDescription").empty() &&
+                       text("shortDescription") != rule,
+                   rule + ": listed once, with a title and a description");
+        }
+    }
 } // namespace
 
 int main()
@@ -148,5 +203,6 @@ int main()
     EmptyLog();
     FindingWithLocations();
     WarningWithoutLocation();
+    EveryRuleIsDescribed();
     return unittests::Finish("sarif_test");
 }
