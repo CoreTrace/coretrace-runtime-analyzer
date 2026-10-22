@@ -251,6 +251,60 @@ namespace coretrace::runtime_analyzer
         }
     } // namespace
 
+    std::optional<RuleDescription> DescribeRule(std::string_view rule)
+    {
+        struct DescribedRule
+        {
+            std::string_view rule;
+            RuleDescription description;
+        };
+        // Every rule ParseFindings reports: the bounds rules, double-free and memory-leak, and the
+        // vtable rules with their fallback.
+        static constexpr DescribedRule kRules[] = {
+            {"heap-buffer-overflow",
+             {"Heap buffer overflow", "A read or a write past the bounds of a heap allocation, "
+                                      "observed while the program ran."}},
+            {"stack-buffer-overflow",
+             {"Stack buffer overflow", "A read or a write past the bounds of a stack object, "
+                                       "observed while the program ran."}},
+            {"heap-use-after-free",
+             {"Use of freed heap memory", "A read or a write to heap memory after it was freed, "
+                                          "observed while the program ran."}},
+            {"double-free",
+             {"Double free", "Heap memory freed a second time, observed while the program ran."}},
+            {"memory-leak",
+             {"Memory leak", "Heap memory the program allocated and had not freed when it ended."}},
+            {"vtable-null-this",
+             {"Virtual call through a null object",
+              "A virtual call made through a null pointer to an object."}},
+            {"vtable-use-after-free",
+             {"Virtual call through a freed object",
+              "A virtual call made through an object whose memory was already freed."}},
+            {"vtable-corrupted",
+             {"Virtual call through a corrupted vtable",
+              "A virtual call made through an object whose vtable pointer is missing, invalid "
+              "or without type information."}},
+            {"vcall-invalid-target",
+             {"Virtual call to non-executable memory",
+              "A virtual call whose target address is not in executable memory."}},
+            {"vtable-type-mismatch",
+             {"Object of an unexpected dynamic type",
+              "At a virtual call, the object's dynamic type differs from its static type, or "
+              "comes from another module: a possible type confusion, or a legitimate cast."}},
+            {"vtable-diagnostic",
+             {"Other virtual call issue", "A vtable or virtual call problem the runtime reported "
+                                          "without a more specific rule."}},
+        };
+        for (const DescribedRule& described : kRules)
+        {
+            if (described.rule == rule)
+            {
+                return described.description;
+            }
+        }
+        return std::nullopt;
+    }
+
     std::vector<Finding> ParseFindings(std::string_view output)
     {
         std::vector<Finding> findings;
