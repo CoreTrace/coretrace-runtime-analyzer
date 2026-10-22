@@ -125,9 +125,13 @@ $ echo $?
 ```
 
 `--format sarif` prints a SARIF 2.1.0 log instead of the text summary: one result per finding
-with `ruleId`, `level`, `message.text` and `properties.cwe`, the faulting access as
-`locations[0]` and the allocation site as `relatedLocations[0]` (`id` 0, "allocated here"). In
-`--test-dir` mode, the log holds the findings of every program in one run.
+with `ruleId`, `level`, `message.text`, `properties.cwe` and `properties.confidence`, the faulting
+access as `locations[0]` and the allocation site as `relatedLocations[0]` (`id` 0, "allocated
+here"). The confidence is `high` for a fault observed while the program ran, `medium` for a vtable
+type mismatch, which may be a legitimate cast, and `low` for a vtable report without a more
+specific rule. `tool.driver.rules` lists each rule reported, with a title (`shortDescription`) and
+what it detects (`fullDescription`), for a consumer such as GitHub code scanning to explain the
+finding. In `--test-dir` mode, the log holds the findings of every program in one run.
 
 ```console
 $ runtime-analyzer --format sarif -- --ct-modules=alloc,bounds findings/heap_overflow_write.c
@@ -141,12 +145,14 @@ $ runtime-analyzer --format sarif -- --ct-modules=alloc,bounds findings/heap_ove
           "locations": [ { "physicalLocation": { "artifactLocation": { "uri": "findings/heap_overflow_write.c" },
                                                  "region": { "startColumn": 15, "startLine": 7 } } } ],
           "message": { "text": "heap-buffer-overflow WRITE of size 4" },
-          "properties": { "cwe": "CWE-122" },
+          "properties": { "confidence": "high", "cwe": "CWE-122" },
           "relatedLocations": [ { "id": 0, "message": { "text": "allocated here" }, ... } ],
           "ruleId": "heap-buffer-overflow"
         }
       ],
-      "tool": { "driver": { "name": "coretrace-runtime-analyzer", ... } }
+      "tool": { "driver": { "name": "coretrace-runtime-analyzer",
+                            "rules": [ { "id": "heap-buffer-overflow",
+                                         "shortDescription": { "text": "Heap buffer overflow" }, ... } ], ... } }
     }
   ],
   "version": "2.1.0"
@@ -230,7 +236,7 @@ ctest --test-dir build --output-on-failure
 | `findings_unit`, `process_unit` | the report parser and the process runner (`unittests/`) |
 | `cli_args_unit` | argument parsing, every option and every invalid spelling, the compiler's `-o`, the compile-only and `-x` flags, the C-as-C++ and `DEBUG` heuristics, the compiler arguments of a run, the artifact names of a batch (`src/cli_args.hpp`) |
 | `events_unit` | the CoreTrace event lines of a run and their summary, ANSI colours stripped, and the verdict drawn from a result (`src/events.hpp`) |
-| `sarif_unit` | the SARIF writer against the exact log a consumer reads: empty, an error with its locations, a warning without one |
+| `sarif_unit` | the SARIF writer against the exact log a consumer reads: empty, an error with its locations, a warning without one; every rule listed with a title and a description, and each finding's confidence |
 | `api_unit` | the library API: `Run` and `RunBatch` on real programs, a heap overflow, a compile-only run, a hang against the timeout, a batch, the refused and empty cases |
 | `consumer` | a project fetching this repository the way ctrace does (`unittests/consumer/`) configures, builds, links `coretrace::runtime-analyzer_lib` and analyzes a program |
 | `fixtures` | every source under `test/` states what it proves in its header (`// args:`, `// expect:`), and the analyzer proves it: findings with rule, CWE, level, faulting line and allocation site, or none; the program's exit status and output when stated. A fixture without an expectation fails (`test/check_fixtures.py`) |
