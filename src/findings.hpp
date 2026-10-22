@@ -13,11 +13,13 @@ namespace coretrace::runtime_analyzer
     // The memory errors the CoreTrace runtime reported in `output`, without ANSI escapes.
     [[nodiscard]] std::vector<Finding> ParseFindings(std::string_view output);
 
-    // What a rule checks, for a SARIF consumer to explain the rule's findings.
+    // What a rule checks, for a SARIF consumer to explain the rule's findings, and how sure a
+    // finding of it is: "high" for a fault observed while the program ran, lower for an inference.
     struct RuleDescription
     {
         std::string_view title;
         std::string_view description;
+        std::string_view confidence;
     };
 
     // The description of `rule`; nothing for a rule this analyzer does not report.
