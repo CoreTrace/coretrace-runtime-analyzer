@@ -196,6 +196,28 @@ namespace
                    rule + ": listed once, with a title and a description");
         }
     }
+
+    // How sure a finding is: a fault observed while the program ran is certain; a vtable type
+    // mismatch may be a legitimate cast; an unrecognized vtable report says little.
+    void EveryFindingHasAConfidence()
+    {
+        const std::vector<std::pair<std::string, std::string>> expected = {
+            {"heap-buffer-overflow", "high"},
+            {"memory-leak", "high"},
+            {"vtable-type-mismatch", "medium"},
+            {"vtable-diagnostic", "low"}};
+        for (const auto& [rule, confidence] : expected)
+        {
+            llvm::json::Object run = Run({OfRule(rule)});
+            const llvm::json::Array* results = run.getArray("results");
+            const llvm::json::Object* result =
+                results != nullptr && results->size() == 1 ? (*results)[0].getAsObject() : nullptr;
+            const llvm::json::Object* properties =
+                result != nullptr ? result->getObject("properties") : nullptr;
+            Expect(properties != nullptr && properties->getString("confidence") == confidence,
+                   rule + ": confidence " + confidence);
+        }
+    }
 } // namespace
 
 int main()
@@ -204,5 +226,6 @@ int main()
     FindingWithLocations();
     WarningWithoutLocation();
     EveryRuleIsDescribed();
+    EveryFindingHasAConfidence();
     return unittests::Finish("sarif_test");
 }
