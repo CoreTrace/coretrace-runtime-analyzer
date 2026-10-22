@@ -47,11 +47,16 @@ namespace coretrace::runtime_analyzer
 
         [[nodiscard]] llvm::json::Object Result(const Finding& finding)
         {
+            llvm::json::Object properties{{"cwe", finding.cwe}};
+            if (const std::optional<RuleDescription> described = DescribeRule(finding.rule))
+            {
+                properties["confidence"] = std::string(described->confidence);
+            }
             llvm::json::Object result{
                 {"ruleId", finding.rule},
                 {"level", finding.severity == Severity::Error ? "error" : "warning"},
                 {"message", llvm::json::Object{{"text", finding.message}}},
-                {"properties", llvm::json::Object{{"cwe", finding.cwe}}},
+                {"properties", std::move(properties)},
             };
             if (finding.location)
             {

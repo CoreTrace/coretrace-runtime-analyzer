@@ -87,6 +87,7 @@ namespace
             "text": "heap-buffer-overflow WRITE of size 4"
           },
           "properties": {
+            "confidence": "high",
             "cwe": "CWE-122"
           },
           "relatedLocations": [
@@ -135,6 +136,7 @@ namespace
             "text": "leak of 16 bytes"
           },
           "properties": {
+            "confidence": "high",
             "cwe": "CWE-401"
           },
           "relatedLocations": [
