@@ -31,11 +31,14 @@ namespace
     {
       "results": )";
 
-    constexpr std::string_view kTail = R"(,
+    constexpr std::string_view kDriver = R"(,
       "tool": {
         "driver": {
           "informationUri": "https://github.com/CoreTrace/coretrace-runtime-analyzer",
-          "name": "coretrace-runtime-analyzer"
+          "name": "coretrace-runtime-analyzer",
+          "rules": )";
+
+    constexpr std::string_view kTail = R"(
         }
       }
     }
@@ -44,14 +47,16 @@ namespace
 }
 )";
 
-    [[nodiscard]] std::string Log(std::string_view results)
+    // The log of `results`, its driver listing `rules`.
+    [[nodiscard]] std::string Log(std::string_view results, std::string_view rules = "[]")
     {
-        return std::string(kHead) + std::string(results) + std::string(kTail);
+        return std::string(kHead) + std::string(results) + std::string(kDriver) +
+               std::string(rules) + std::string(kTail);
     }
 
     void EmptyLog()
     {
-        Expect(Sarif({}) == Log("[]"), "no finding: an empty results array");
+        Expect(Sarif({}) == Log("[]"), "no finding: empty results and rules arrays");
     }
 
     void FindingWithLocations()
@@ -103,7 +108,18 @@ namespace
           ],
           "ruleId": "heap-buffer-overflow"
         }
-      ])");
+      ])",
+                                         R"([
+            {
+              "fullDescription": {
+                "text": "A read or a write past the bounds of a heap allocation, observed while the program ran."
+              },
+              "id": "heap-buffer-overflow",
+              "shortDescription": {
+                "text": "Heap buffer overflow"
+              }
+            }
+          ])");
         Expect(Sarif({finding}) == expected,
                "one error: location, allocation site as related location 0, rule, CWE");
     }
@@ -139,7 +155,18 @@ namespace
           ],
           "ruleId": "memory-leak"
         }
-      ])");
+      ])",
+                                         R"([
+            {
+              "fullDescription": {
+                "text": "Heap memory the program allocated and had not freed when it ended."
+              },
+              "id": "memory-leak",
+              "shortDescription": {
+                "text": "Memory leak"
+              }
+            }
+          ])");
         Expect(Sarif({finding}) == expected,
                "one warning: no locations, no column when the runtime gave none");
     }

@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "sarif.hpp"
 
+#include "findings.hpp"
+
 #include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_os_ostream.h>
 
+#include <set>
+#include <string>
 #include <utility>
 
 namespace coretrace::runtime_analyzer
@@ -25,6 +29,20 @@ namespace coretrace::runtime_analyzer
                      {"region", std::move(region)},
                  }},
             };
+        }
+
+        // A rule as the log lists it: its id, and its title and description when it has them.
+        [[nodiscard]] llvm::json::Object Rule(const std::string& rule)
+        {
+            llvm::json::Object listed{{"id", rule}};
+            if (const std::optional<RuleDescription> described = DescribeRule(rule))
+            {
+                listed["shortDescription"] =
+                    llvm::json::Object{{"text", std::string(described->title)}};
+                listed["fullDescription"] =
+                    llvm::json::Object{{"text", std::string(described->description)}};
+            }
+            return listed;
         }
 
         [[nodiscard]] llvm::json::Object Result(const Finding& finding)
@@ -53,14 +71,21 @@ namespace coretrace::runtime_analyzer
     void WriteSarif(std::ostream& out, const std::vector<Finding>& findings)
     {
         llvm::json::Array results;
+        llvm::json::Array rules;
+        std::set<std::string> listed;
         for (const Finding& finding : findings)
         {
             results.push_back(Result(finding));
+            if (listed.insert(finding.rule).second)
+            {
+                rules.push_back(Rule(finding.rule));
+            }
         }
 
         llvm::json::Object driver{
             {"name", "coretrace-runtime-analyzer"},
             {"informationUri", "https://github.com/CoreTrace/coretrace-runtime-analyzer"},
+            {"rules", std::move(rules)},
         };
         llvm::json::Object run{
             {"tool", llvm::json::Object{{"driver", std::move(driver)}}},
