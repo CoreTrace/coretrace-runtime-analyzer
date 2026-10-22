@@ -5,6 +5,8 @@ Notable changes are grouped by release. See [all releases](https://github.com/Co
 ## Unreleased
 
 - Added repository contribution and community documentation.
+- SARIF: `tool.driver.rules` lists each rule reported with a title and a description, and each
+  result carries its confidence (`high`, `medium` or `low`).
 
 ## v0.1.0
 
