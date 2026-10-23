@@ -7,6 +7,8 @@ Notable changes are grouped by release. See [all releases](https://github.com/Co
 - Added repository contribution and community documentation.
 - SARIF: `tool.driver.rules` lists each rule reported with a title and a description, and each
   result carries its confidence (`high`, `medium` or `low`).
+- A vtable box whose only warning is `missing typeinfo`, as a valid `-fno-rtti` program logs, is
+  now a `vtable-diagnostic` warning instead of a `vtable-corrupted` error.
 
 ## v0.1.0
 

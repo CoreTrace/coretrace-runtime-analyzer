@@ -31,12 +31,15 @@ captures its output, and turns each report of the CoreTrace runtime into a findi
 | `vtable-corrupted` | CWE-843 | virtual call site |
 | `vcall-invalid-target` | CWE-843 | virtual call site |
 | `vtable-type-mismatch` | CWE-843, warning | virtual call site |
+| `vtable-diagnostic` | CWE-843, warning | virtual call site |
 
 The memory rules come from the `alloc` and `bounds` modules, which the default module set
 enables. The vtable rules come from the `vtable` module's diagnostics
 (`--ct-modules=alloc,vtable --ct-vtable-diag`): each box the runtime logs at `WARN` level is one
-finding, its message listing the box's warnings and its rule the most specific one. Boxes logged
-at `INFO` level are tracing and produce no finding.
+finding, its message listing the box's warnings and its rule the most specific one. A box with
+no more specific warning is `vtable-diagnostic`: `missing typeinfo` alone, which a valid program
+built with `-fno-rtti` produces, is one. Boxes logged at `INFO` level are tracing and produce no
+finding.
 
 Sites carry the path the source was compiled from, so run the analyzer from the directory the
 static analyzers report paths from.

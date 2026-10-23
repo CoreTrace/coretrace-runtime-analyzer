@@ -102,10 +102,11 @@ namespace coretrace::runtime_analyzer
             {"vptr on freed object", "vtable-use-after-free", "CWE-416", Severity::Error},
             {"vtable resolve failed", "vtable-corrupted", "CWE-843", Severity::Error},
             {"no vptr", "vtable-corrupted", "CWE-843", Severity::Error},
-            {"missing typeinfo", "vtable-corrupted", "CWE-843", Severity::Error},
             {"target in non-exec memory", "vcall-invalid-target", "CWE-843", Severity::Error},
             {"static!=dynamic type", "vtable-type-mismatch", "CWE-843", Severity::Warning},
             {"module mismatch: ", "vtable-type-mismatch", "CWE-843", Severity::Warning},
+            // Valid under -fno-rtti, so it never outranks another warning of the box.
+            {"missing typeinfo", "vtable-diagnostic", "CWE-843", Severity::Warning},
         };
 
         // A box the runtime logged at WARN level: "[VTABLE]" or "[VCALL]", then "│ label : value │"
@@ -290,8 +291,8 @@ namespace coretrace::runtime_analyzer
               "A virtual call made through an object whose memory was already freed.", "high"}},
             {"vtable-corrupted",
              {"Virtual call through a corrupted vtable",
-              "A virtual call made through an object whose vtable pointer is missing, invalid "
-              "or without type information.",
+              "A virtual call made through an object whose vtable pointer is missing or "
+              "invalid.",
               "high"}},
             {"vcall-invalid-target",
              {"Virtual call to non-executable memory",
@@ -303,8 +304,8 @@ namespace coretrace::runtime_analyzer
               "medium"}},
             {"vtable-diagnostic",
              {"Other virtual call issue",
-              "A vtable or virtual call problem the runtime reported "
-              "without a more specific rule.",
+              "A vtable or virtual call problem the runtime reported without a more specific "
+              "rule, such as a vtable without type information, as built with -fno-rtti.",
               "low"}},
         };
         for (const DescribedRule& described : kRules)

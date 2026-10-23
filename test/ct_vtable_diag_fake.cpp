@@ -22,7 +22,7 @@ int main()
     }
 
     table[0] = nullptr; // offset-to-top
-    table[1] = nullptr; // missing typeinfo
+    table[1] = nullptr; // missing typeinfo, outranked by "vtable resolve failed"
     table[2] = nullptr; // fake entry
 
     FakeObject obj{};
