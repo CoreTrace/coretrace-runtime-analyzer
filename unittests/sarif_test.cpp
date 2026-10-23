@@ -173,17 +173,35 @@ namespace
                "one warning: no locations, no column when the runtime gave none");
     }
 
-    // The one run of the log Sarif() writes for `findings`.
-    [[nodiscard]] llvm::json::Object Run(const std::vector<Finding>& findings)
+    // The one run of the SARIF log `text`, or an empty object when the log has none.
+    [[nodiscard]] llvm::json::Object RunOf(std::string_view text)
     {
-        llvm::Expected<llvm::json::Value> log = llvm::json::parse(Sarif(findings));
+        llvm::Expected<llvm::json::Value> log = llvm::json::parse(text);
         if (!log)
         {
             llvm::consumeError(log.takeError());
             return {};
         }
-        const llvm::json::Array* runs = log->getAsObject()->getArray("runs");
-        return runs != nullptr && !runs->empty() ? *(*runs)[0].getAsObject() : llvm::json::Object{};
+        const llvm::json::Object* root = log->getAsObject();
+        const llvm::json::Array* runs = root != nullptr ? root->getArray("runs") : nullptr;
+        const llvm::json::Object* run =
+            runs != nullptr && !runs->empty() ? (*runs)[0].getAsObject() : nullptr;
+        return run != nullptr ? *run : llvm::json::Object{};
+    }
+
+    // The one run of the log Sarif() writes for `findings`.
+    [[nodiscard]] llvm::json::Object Run(const std::vector<Finding>& findings)
+    {
+        return RunOf(Sarif(findings));
+    }
+
+    // A log of the wrong shape has no run, so the checks on it fail instead of crashing.
+    void MalformedLogHasNoRun()
+    {
+        for (const std::string_view text : {R"([])", R"({"runs": [1]})"})
+        {
+            Expect(RunOf(text).empty(), std::string(text) + ": no run");
+        }
     }
 
     [[nodiscard]] Finding OfRule(std::string rule)
@@ -254,6 +272,7 @@ int main()
     EmptyLog();
     FindingWithLocations();
     WarningWithoutLocation();
+    MalformedLogHasNoRun();
     EveryRuleIsDescribed();
     EveryFindingHasAConfidence();
     return unittests::Finish("sarif_test");
