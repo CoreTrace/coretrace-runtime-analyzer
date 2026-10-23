@@ -10,18 +10,87 @@ namespace coretrace::runtime_analyzer
 {
     namespace
     {
-        // A bounds report line, "ct: <kind> WRITE|READ of size N", and its CWE by access.
+        // A rule ParseFindings reports, with what a SARIF consumer shows of it.
+        struct CatalogueRule
+        {
+            std::string_view id;
+            RuleDescription description;
+        };
+
+        constexpr CatalogueRule kRules[] = {
+            {"heap-buffer-overflow",
+             {"Heap buffer overflow",
+              "A read or a write past the bounds of a heap allocation, "
+              "observed while the program ran.",
+              "high"}},
+            {"stack-buffer-overflow",
+             {"Stack buffer overflow",
+              "A read or a write past the bounds of a stack object, "
+              "observed while the program ran.",
+              "high"}},
+            {"heap-use-after-free",
+             {"Use of freed heap memory",
+              "A read or a write to heap memory after it was freed, "
+              "observed while the program ran.",
+              "high"}},
+            {"double-free",
+             {"Double free", "Heap memory freed a second time, observed while the program ran.",
+              "high"}},
+            {"memory-leak",
+             {"Memory leak", "Heap memory the program allocated and had not freed when it ended.",
+              "high"}},
+            {"vtable-null-this",
+             {"Virtual call through a null object",
+              "A virtual call made through a null pointer to an object.", "high"}},
+            {"vtable-use-after-free",
+             {"Virtual call through a freed object",
+              "A virtual call made through an object whose memory was already freed.", "high"}},
+            {"vtable-corrupted",
+             {"Virtual call through a corrupted vtable",
+              "A virtual call made through an object whose vtable pointer is missing or "
+              "invalid.",
+              "high"}},
+            {"vcall-invalid-target",
+             {"Virtual call to non-executable memory",
+              "A virtual call whose target address is not in executable memory.", "high"}},
+            {"vtable-type-mismatch",
+             {"Object of an unexpected dynamic type",
+              "At a virtual call, the object's dynamic type differs from its static type, or "
+              "comes from another module: a possible type confusion, or a legitimate cast.",
+              "medium"}},
+            {"vtable-diagnostic",
+             {"Other virtual call issue",
+              "A vtable or virtual call problem the runtime reported without a more specific "
+              "rule, such as a vtable without type information, as built with -fno-rtti.",
+              "low"}},
+        };
+
+        // The catalogue entry of `id`. The parser names its rules only through it, so a rule
+        // missing from kRules does not compile.
+        [[nodiscard]] consteval const CatalogueRule& RuleNamed(std::string_view id)
+        {
+            for (const CatalogueRule& rule : kRules)
+            {
+                if (rule.id == id)
+                {
+                    return rule;
+                }
+            }
+            throw "rule missing from kRules";
+        }
+
+        // A bounds report line, "ct: <rule id> WRITE|READ of size N", and its CWE by access.
         struct BoundsRule
         {
-            std::string_view kind;
+            const CatalogueRule& rule;
             std::string_view write_cwe;
             std::string_view read_cwe;
         };
 
         constexpr BoundsRule kBoundsRules[] = {
-            {"heap-buffer-overflow", "CWE-122", "CWE-125"},
-            {"stack-buffer-overflow", "CWE-121", "CWE-125"},
-            {"heap-use-after-free", "CWE-416", "CWE-416"},
+            {RuleNamed("heap-buffer-overflow"), "CWE-122", "CWE-125"},
+            {RuleNamed("stack-buffer-overflow"), "CWE-121", "CWE-125"},
+            {RuleNamed("heap-use-after-free"), "CWE-416", "CWE-416"},
         };
 
         // The value of a "key=value" field, up to the next space. The key must start the line
@@ -92,21 +161,24 @@ namespace coretrace::runtime_analyzer
         struct VtableRule
         {
             std::string_view warning; // matched as a prefix of the box's "warn" values
-            std::string_view rule;
+            const CatalogueRule& rule;
             std::string_view cwe;
             Severity severity;
         };
 
         constexpr VtableRule kVtableRules[] = {
-            {"null this pointer", "vtable-null-this", "CWE-476", Severity::Error},
-            {"vptr on freed object", "vtable-use-after-free", "CWE-416", Severity::Error},
-            {"vtable resolve failed", "vtable-corrupted", "CWE-843", Severity::Error},
-            {"no vptr", "vtable-corrupted", "CWE-843", Severity::Error},
-            {"target in non-exec memory", "vcall-invalid-target", "CWE-843", Severity::Error},
-            {"static!=dynamic type", "vtable-type-mismatch", "CWE-843", Severity::Warning},
-            {"module mismatch: ", "vtable-type-mismatch", "CWE-843", Severity::Warning},
+            {"null this pointer", RuleNamed("vtable-null-this"), "CWE-476", Severity::Error},
+            {"vptr on freed object", RuleNamed("vtable-use-after-free"), "CWE-416",
+             Severity::Error},
+            {"vtable resolve failed", RuleNamed("vtable-corrupted"), "CWE-843", Severity::Error},
+            {"no vptr", RuleNamed("vtable-corrupted"), "CWE-843", Severity::Error},
+            {"target in non-exec memory", RuleNamed("vcall-invalid-target"), "CWE-843",
+             Severity::Error},
+            {"static!=dynamic type", RuleNamed("vtable-type-mismatch"), "CWE-843",
+             Severity::Warning},
+            {"module mismatch: ", RuleNamed("vtable-type-mismatch"), "CWE-843", Severity::Warning},
             // Valid under -fno-rtti, so it never outranks another warning of the box.
-            {"missing typeinfo", "vtable-diagnostic", "CWE-843", Severity::Warning},
+            {"missing typeinfo", RuleNamed("vtable-diagnostic"), "CWE-843", Severity::Warning},
         };
 
         // A box the runtime logged at WARN level: "[VTABLE]" or "[VCALL]", then "│ label : value │"
@@ -192,7 +264,7 @@ namespace coretrace::runtime_analyzer
                 {
                     return std::nullopt;
                 }
-                finding.rule = rule != nullptr ? rule->rule : "vtable-diagnostic";
+                finding.rule = rule != nullptr ? rule->rule.id : RuleNamed("vtable-diagnostic").id;
                 finding.cwe = rule != nullptr ? rule->cwe : "CWE-843";
                 finding.severity = rule != nullptr ? rule->severity : Severity::Warning;
                 return finding;
@@ -212,18 +284,18 @@ namespace coretrace::runtime_analyzer
 
         [[nodiscard]] std::optional<Finding> BoundsFinding(std::string_view line)
         {
-            for (const BoundsRule& rule : kBoundsRules)
+            for (const BoundsRule& bounds : kBoundsRules)
             {
-                const std::size_t at = line.find("ct: " + std::string(rule.kind) + " ");
+                const std::size_t at = line.find("ct: " + std::string(bounds.rule.id) + " ");
                 if (at == std::string_view::npos)
                 {
                     continue;
                 }
                 Finding finding;
-                finding.rule = rule.kind;
+                finding.rule = bounds.rule.id;
                 finding.message = line.substr(at + 4);
                 const bool write = finding.message.find(" WRITE ") != std::string::npos;
-                finding.cwe = write ? rule.write_cwe : rule.read_cwe;
+                finding.cwe = write ? bounds.write_cwe : bounds.read_cwe;
                 return finding;
             }
             return std::nullopt;
@@ -231,12 +303,12 @@ namespace coretrace::runtime_analyzer
 
         // The site fields of a one-line report: "site=" is the faulting access and
         // "alloc_site=" the allocation.
-        [[nodiscard]] Finding OneLineFinding(std::string_view line, std::string_view rule,
+        [[nodiscard]] Finding OneLineFinding(std::string_view line, const CatalogueRule& rule,
                                              std::string_view cwe, Severity severity,
                                              std::string message)
         {
             Finding finding;
-            finding.rule = rule;
+            finding.rule = rule.id;
             finding.cwe = cwe;
             finding.severity = severity;
             finding.message = std::move(message);
@@ -254,63 +326,9 @@ namespace coretrace::runtime_analyzer
 
     std::optional<RuleDescription> DescribeRule(std::string_view rule)
     {
-        struct DescribedRule
+        for (const CatalogueRule& described : kRules)
         {
-            std::string_view rule;
-            RuleDescription description;
-        };
-        // Every rule ParseFindings reports: the bounds rules, double-free and memory-leak, and the
-        // vtable rules with their fallback.
-        static constexpr DescribedRule kRules[] = {
-            {"heap-buffer-overflow",
-             {"Heap buffer overflow",
-              "A read or a write past the bounds of a heap allocation, "
-              "observed while the program ran.",
-              "high"}},
-            {"stack-buffer-overflow",
-             {"Stack buffer overflow",
-              "A read or a write past the bounds of a stack object, "
-              "observed while the program ran.",
-              "high"}},
-            {"heap-use-after-free",
-             {"Use of freed heap memory",
-              "A read or a write to heap memory after it was freed, "
-              "observed while the program ran.",
-              "high"}},
-            {"double-free",
-             {"Double free", "Heap memory freed a second time, observed while the program ran.",
-              "high"}},
-            {"memory-leak",
-             {"Memory leak", "Heap memory the program allocated and had not freed when it ended.",
-              "high"}},
-            {"vtable-null-this",
-             {"Virtual call through a null object",
-              "A virtual call made through a null pointer to an object.", "high"}},
-            {"vtable-use-after-free",
-             {"Virtual call through a freed object",
-              "A virtual call made through an object whose memory was already freed.", "high"}},
-            {"vtable-corrupted",
-             {"Virtual call through a corrupted vtable",
-              "A virtual call made through an object whose vtable pointer is missing or "
-              "invalid.",
-              "high"}},
-            {"vcall-invalid-target",
-             {"Virtual call to non-executable memory",
-              "A virtual call whose target address is not in executable memory.", "high"}},
-            {"vtable-type-mismatch",
-             {"Object of an unexpected dynamic type",
-              "At a virtual call, the object's dynamic type differs from its static type, or "
-              "comes from another module: a possible type confusion, or a legitimate cast.",
-              "medium"}},
-            {"vtable-diagnostic",
-             {"Other virtual call issue",
-              "A vtable or virtual call problem the runtime reported without a more specific "
-              "rule, such as a vtable without type information, as built with -fno-rtti.",
-              "low"}},
-        };
-        for (const DescribedRule& described : kRules)
-        {
-            if (described.rule == rule)
+            if (described.id == rule)
             {
                 return described.description;
             }
@@ -379,8 +397,8 @@ namespace coretrace::runtime_analyzer
             }
             else if (line.find("(double free)") != std::string_view::npos)
             {
-                findings.push_back(
-                    OneLineFinding(line, "double-free", "CWE-415", Severity::Error, "double free"));
+                findings.push_back(OneLineFinding(line, RuleNamed("double-free"), "CWE-415",
+                                                  Severity::Error, "double free"));
             }
             else if (line.find("ct: leak ptr=") != std::string_view::npos)
             {
@@ -389,8 +407,8 @@ namespace coretrace::runtime_analyzer
                 {
                     message += " of " + std::string(*size) + " bytes";
                 }
-                findings.push_back(OneLineFinding(line, "memory-leak", "CWE-401", Severity::Warning,
-                                                  std::move(message)));
+                findings.push_back(OneLineFinding(line, RuleNamed("memory-leak"), "CWE-401",
+                                                  Severity::Warning, std::move(message)));
             }
         }
         return findings;
