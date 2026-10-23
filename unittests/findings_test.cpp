@@ -265,6 +265,7 @@ namespace
         };
         constexpr Case cases[] = {
             {"vptr on freed object", "vtable-use-after-free", "CWE-416", Severity::Error},
+            {"missing typeinfo", "vtable-diagnostic", "CWE-843", Severity::Warning},
             {"missing typeinfo|vtable resolve failed", "vtable-corrupted", "CWE-843",
              Severity::Error},
             {"no vptr", "vtable-corrupted", "CWE-843", Severity::Error},
@@ -275,6 +276,8 @@ namespace
             // The most specific warning decides.
             {"no vptr|vptr on freed object", "vtable-use-after-free", "CWE-416", Severity::Error},
             {"static!=dynamic type|target in non-exec memory", "vcall-invalid-target", "CWE-843",
+             Severity::Error},
+            {"missing typeinfo|target in non-exec memory", "vcall-invalid-target", "CWE-843",
              Severity::Error},
         };
         for (const Case& c : cases)

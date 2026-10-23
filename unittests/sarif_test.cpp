@@ -4,6 +4,8 @@
 
 #include "expect.hpp"
 
+#include <llvm/Support/JSON.h>
+
 #include <sstream>
 #include <string>
 #include <vector>
@@ -29,11 +31,14 @@ namespace
     {
       "results": )";
 
-    constexpr std::string_view kTail = R"(,
+    constexpr std::string_view kDriver = R"(,
       "tool": {
         "driver": {
           "informationUri": "https://github.com/CoreTrace/coretrace-runtime-analyzer",
-          "name": "coretrace-runtime-analyzer"
+          "name": "coretrace-runtime-analyzer",
+          "rules": )";
+
+    constexpr std::string_view kTail = R"(
         }
       }
     }
@@ -42,14 +47,16 @@ namespace
 }
 )";
 
-    [[nodiscard]] std::string Log(std::string_view results)
+    // The log of `results`, its driver listing `rules`.
+    [[nodiscard]] std::string Log(std::string_view results, std::string_view rules = "[]")
     {
-        return std::string(kHead) + std::string(results) + std::string(kTail);
+        return std::string(kHead) + std::string(results) + std::string(kDriver) +
+               std::string(rules) + std::string(kTail);
     }
 
     void EmptyLog()
     {
-        Expect(Sarif({}) == Log("[]"), "no finding: an empty results array");
+        Expect(Sarif({}) == Log("[]"), "no finding: empty results and rules arrays");
     }
 
     void FindingWithLocations()
@@ -80,6 +87,7 @@ namespace
             "text": "heap-buffer-overflow WRITE of size 4"
           },
           "properties": {
+            "confidence": "high",
             "cwe": "CWE-122"
           },
           "relatedLocations": [
@@ -101,7 +109,18 @@ namespace
           ],
           "ruleId": "heap-buffer-overflow"
         }
-      ])");
+      ])",
+                                         R"([
+            {
+              "fullDescription": {
+                "text": "A read or a write past the bounds of a heap allocation, observed while the program ran."
+              },
+              "id": "heap-buffer-overflow",
+              "shortDescription": {
+                "text": "Heap buffer overflow"
+              }
+            }
+          ])");
         Expect(Sarif({finding}) == expected,
                "one error: location, allocation site as related location 0, rule, CWE");
     }
@@ -117,6 +136,7 @@ namespace
             "text": "leak of 16 bytes"
           },
           "properties": {
+            "confidence": "high",
             "cwe": "CWE-401"
           },
           "relatedLocations": [
@@ -137,9 +157,95 @@ namespace
           ],
           "ruleId": "memory-leak"
         }
-      ])");
+      ])",
+                                         R"([
+            {
+              "fullDescription": {
+                "text": "Heap memory the program allocated and had not freed when it ended."
+              },
+              "id": "memory-leak",
+              "shortDescription": {
+                "text": "Memory leak"
+              }
+            }
+          ])");
         Expect(Sarif({finding}) == expected,
                "one warning: no locations, no column when the runtime gave none");
+    }
+
+    // The one run of the log Sarif() writes for `findings`.
+    [[nodiscard]] llvm::json::Object Run(const std::vector<Finding>& findings)
+    {
+        llvm::Expected<llvm::json::Value> log = llvm::json::parse(Sarif(findings));
+        if (!log)
+        {
+            llvm::consumeError(log.takeError());
+            return {};
+        }
+        const llvm::json::Array* runs = log->getAsObject()->getArray("runs");
+        return runs != nullptr && !runs->empty() ? *(*runs)[0].getAsObject() : llvm::json::Object{};
+    }
+
+    [[nodiscard]] Finding OfRule(std::string rule)
+    {
+        return Finding{std::move(rule), "CWE-0", Severity::Error, "m", std::nullopt, std::nullopt};
+    }
+
+    // A SARIF consumer (GitHub code scanning, an IDE, CoreTrace's merged log) explains a finding
+    // from its rule: every rule the analyzer reports is listed once, with a title and a
+    // description.
+    void EveryRuleIsDescribed()
+    {
+        const std::vector<std::string> rules = {
+            "heap-buffer-overflow",  "stack-buffer-overflow", "heap-use-after-free",
+            "double-free",           "memory-leak",           "vtable-null-this",
+            "vtable-use-after-free", "vtable-corrupted",      "vcall-invalid-target",
+            "vtable-type-mismatch",  "vtable-diagnostic"};
+        for (const std::string& rule : rules)
+        {
+            llvm::json::Object run = Run({OfRule(rule), OfRule(rule)});
+            const llvm::json::Object* driver = run.getObject("tool") != nullptr
+                                                   ? run.getObject("tool")->getObject("driver")
+                                                   : nullptr;
+            const llvm::json::Array* listed =
+                driver != nullptr ? driver->getArray("rules") : nullptr;
+            const llvm::json::Object* entry =
+                listed != nullptr && listed->size() == 1 ? (*listed)[0].getAsObject() : nullptr;
+            const auto text = [&](llvm::StringRef key) -> llvm::StringRef
+            {
+                const llvm::json::Object* message =
+                    entry != nullptr ? entry->getObject(key) : nullptr;
+                const std::optional<llvm::StringRef> value =
+                    message != nullptr ? message->getString("text") : std::nullopt;
+                return value.value_or("");
+            };
+            Expect(entry != nullptr && entry->getString("id") == rule &&
+                       !text("shortDescription").empty() && !text("fullDescription").empty() &&
+                       text("shortDescription") != rule,
+                   rule + ": listed once, with a title and a description");
+        }
+    }
+
+    // How sure a finding is: a fault observed while the program ran is certain; a vtable type
+    // mismatch may be a legitimate cast; an unrecognized vtable report says little.
+    void EveryFindingHasAConfidence()
+    {
+        const std::vector<std::pair<std::string, std::string>> expected = {
+            {"heap-buffer-overflow", "high"},
+            {"memory-leak", "high"},
+            {"vtable-type-mismatch", "medium"},
+            {"vtable-diagnostic", "low"}};
+        for (const auto& [rule, confidence] : expected)
+        {
+            llvm::json::Object run = Run({OfRule(rule)});
+            const llvm::json::Array* results = run.getArray("results");
+            const llvm::json::Object* result =
+                results != nullptr && results->size() == 1 ? (*results)[0].getAsObject() : nullptr;
+            const llvm::json::Object* properties =
+                result != nullptr ? result->getObject("properties") : nullptr;
+            Expect(properties != nullptr && properties->getString("confidence") == confidence,
+                   rule + ": confidence " + confidence);
+        }
     }
 } // namespace
 
@@ -148,5 +254,7 @@ int main()
     EmptyLog();
     FindingWithLocations();
     WarningWithoutLocation();
+    EveryRuleIsDescribed();
+    EveryFindingHasAConfidence();
     return unittests::Finish("sarif_test");
 }

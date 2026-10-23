@@ -102,10 +102,11 @@ namespace coretrace::runtime_analyzer
             {"vptr on freed object", "vtable-use-after-free", "CWE-416", Severity::Error},
             {"vtable resolve failed", "vtable-corrupted", "CWE-843", Severity::Error},
             {"no vptr", "vtable-corrupted", "CWE-843", Severity::Error},
-            {"missing typeinfo", "vtable-corrupted", "CWE-843", Severity::Error},
             {"target in non-exec memory", "vcall-invalid-target", "CWE-843", Severity::Error},
             {"static!=dynamic type", "vtable-type-mismatch", "CWE-843", Severity::Warning},
             {"module mismatch: ", "vtable-type-mismatch", "CWE-843", Severity::Warning},
+            // Valid under -fno-rtti, so it never outranks another warning of the box.
+            {"missing typeinfo", "vtable-diagnostic", "CWE-843", Severity::Warning},
         };
 
         // A box the runtime logged at WARN level: "[VTABLE]" or "[VCALL]", then "│ label : value │"
@@ -250,6 +251,72 @@ namespace coretrace::runtime_analyzer
             return finding;
         }
     } // namespace
+
+    std::optional<RuleDescription> DescribeRule(std::string_view rule)
+    {
+        struct DescribedRule
+        {
+            std::string_view rule;
+            RuleDescription description;
+        };
+        // Every rule ParseFindings reports: the bounds rules, double-free and memory-leak, and the
+        // vtable rules with their fallback.
+        static constexpr DescribedRule kRules[] = {
+            {"heap-buffer-overflow",
+             {"Heap buffer overflow",
+              "A read or a write past the bounds of a heap allocation, "
+              "observed while the program ran.",
+              "high"}},
+            {"stack-buffer-overflow",
+             {"Stack buffer overflow",
+              "A read or a write past the bounds of a stack object, "
+              "observed while the program ran.",
+              "high"}},
+            {"heap-use-after-free",
+             {"Use of freed heap memory",
+              "A read or a write to heap memory after it was freed, "
+              "observed while the program ran.",
+              "high"}},
+            {"double-free",
+             {"Double free", "Heap memory freed a second time, observed while the program ran.",
+              "high"}},
+            {"memory-leak",
+             {"Memory leak", "Heap memory the program allocated and had not freed when it ended.",
+              "high"}},
+            {"vtable-null-this",
+             {"Virtual call through a null object",
+              "A virtual call made through a null pointer to an object.", "high"}},
+            {"vtable-use-after-free",
+             {"Virtual call through a freed object",
+              "A virtual call made through an object whose memory was already freed.", "high"}},
+            {"vtable-corrupted",
+             {"Virtual call through a corrupted vtable",
+              "A virtual call made through an object whose vtable pointer is missing or "
+              "invalid.",
+              "high"}},
+            {"vcall-invalid-target",
+             {"Virtual call to non-executable memory",
+              "A virtual call whose target address is not in executable memory.", "high"}},
+            {"vtable-type-mismatch",
+             {"Object of an unexpected dynamic type",
+              "At a virtual call, the object's dynamic type differs from its static type, or "
+              "comes from another module: a possible type confusion, or a legitimate cast.",
+              "medium"}},
+            {"vtable-diagnostic",
+             {"Other virtual call issue",
+              "A vtable or virtual call problem the runtime reported without a more specific "
+              "rule, such as a vtable without type information, as built with -fno-rtti.",
+              "low"}},
+        };
+        for (const DescribedRule& described : kRules)
+        {
+            if (described.rule == rule)
+            {
+                return described.description;
+            }
+        }
+        return std::nullopt;
+    }
 
     std::vector<Finding> ParseFindings(std::string_view output)
     {
