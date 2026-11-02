@@ -9,6 +9,7 @@ Notable changes are grouped by release. See [all releases](https://github.com/Co
   result carries its confidence (`high`, `medium` or `low`).
 - A vtable box whose only warning is `missing typeinfo`, as a valid `-fno-rtti` program logs, is
   now a `vtable-diagnostic` warning instead of a `vtable-corrupted` error.
+- `NOTICE` credits the CoreTrace contributors alongside Hugo Payet and links the repository.
 
 ## v0.1.0
 
